@@ -1,107 +1,118 @@
-# Future scope
+# What's not built yet
 
-What's not built yet, roughly in priority order, and why. See `README.md` for
-what exists today and `AGENTS.md` for the rules governing how any of this
-should be built.
+Roughly in priority order. `README.md` covers what exists; `AGENTS.md` covers
+the rules for building any of this.
 
-## 1. Driver / team section — the biggest gap
+## Recently closed
 
-Per Harper University training material (a real underwriting walkthrough, not
-a guess): **an application cannot be submitted without at least one complete
-driver record** (full name, DOB, license number) — training calls this "the
-number one reason submissions fail." `lib/types.ts` already defines a
-`"drivers_team"` `FieldSection`, but zero fields use it today — there is no
-driver data model at all.
+**Vehicle-mix has to add up to 100%, for sales-only dealers.**
+`lib/garageValidationRules.ts` has a small generic mechanism — any group of
+fields that needs to sum to 100% — and one instance of it, the three
+vehicle-mix percentage fields. Shows up live in `ValidationPanel` and in the
+JSON export. Adding another percent-group later is just adding an entry to
+that same file.
 
-Needed:
-- Per-driver fields: name, DOB, license number + state, CDL status,
-  business/personal vehicle use, personal-auto-policy status, full/part-time,
-  3-year violation history. This is naturally an array of structured records,
-  not a scalar field — the current `FieldState` model (one value per field)
-  doesn't fit an array-of-drivers shape and will need a new pattern.
-- A knockout-severity risk flag: zero complete driver records blocks
-  submission entirely (matches the training's "automatic decline" framing).
-- Two deterministic rules ready to encode once the fields exist: (a) no
-  personal auto policy → auto-normalize to "business and personal use"
-  coverage; (b) out-of-state driver license → risk flag (training:
-  "recommend converting to in-state, or coverage may be denied/expensive").
+**A real eval harness.** `scripts/evalAccuracy.ts` plus hand-written answer
+keys in `scripts/answerKeys/` score the mock extractor against known-correct
+values for both scripted demo calls (`npm run eval-accuracy`) — currently
+20/20 on both. This came out of comparing this repo against another
+candidate's submission for the same take-home
+(`Tatch-AI/david-lingan-superday-intake`), which had something similar. Ours
+is a separate implementation with our own answer keys, not theirs. It only
+covers the mock extractor and the two scripted calls right now — real-call,
+`llm`-mode accuracy is still an open question, and it doesn't check driver
+fields yet either.
 
-## 2. Coverage-line recommendation UI
+**A minimal driver record.** `lib/garageDriverFields.ts` and
+`mergeDriverCandidates` in `lib/rules.ts`. `IntakeState.drivers` is an array,
+and each driver's name/DOB/license gets the same status/confidence/evidence/
+conflict tracking as any other field — deliberately not a flat object, see
+the README's design-choices section for why. A knockout flag
+(`no_complete_driver`) fires if nobody on file has all three of name, DOB,
+and license number, once business type is known. There's a read-only panel
+for it now (`DriversPanel`).
 
-`lib/garageCoverageRules.ts` computes the three-pillars recommendation
-(garage liability / garage keepers / dealers physical damage) into
-`IntakeState.recommendedCoverageLines` and it's already in the JSON
-submission export — but nothing renders it. Needs a panel alongside
-`SupplementsPanel`/`RiskFlagsPanel` showing which lines apply and why.
+## Driver record — what's still missing
 
-## 3. Remaining supplemental forms
+- **Only handles one driver.** Everything merges into `drivers[0]`. Getting a
+  second driver working means figuring out which utterance belongs to which
+  person — probably by matching a name already on file, and starting a new
+  record otherwise.
+- **No editing.** You can see what got extracted but there's no way to
+  confirm or correct a driver field yet — `FieldRow` has that for top-level
+  fields, the nested driver shape doesn't have an equivalent.
+- **Eval harness doesn't check drivers.** It only reads `state.fields`.
+- Two rules from the training material aren't built: no personal auto policy
+  should auto-set coverage to "business and personal use," and an
+  out-of-state license should raise a flag recommending the driver switch to
+  in-state.
 
-Only 4 of the 27 `GARAGE_SUP_*` questionnaires in `garage_auto/forms/` are
-wired up (heavy vehicle, towing, wholesale dealer, lessors risk) — the base
-field catalog doesn't yet ask about the exposures (auto auction, valet,
-salvage yard, young driver, hired & non-owned auto, RV, boat/watercraft,
-etc.) the rest depend on. Adding one: read the real PDF, curate its
-underwriting-relevant questions into `lib/garageFieldDefinitions.ts` the same
-way GARAGE_001 was distilled (the raw PDFs have generically-named AcroForm
-fields with no machine-readable labels — this is a curation task, not a
-mechanical field dump), then add a trigger in `garageSupplementRules.ts`,
-marked `validated: false` until underwriting confirms the mapping.
+## Coverage-line recommendation has no UI
 
-## 4. Missing base-application fields
+`lib/garageCoverageRules.ts` already figures out which of the three coverage
+lines apply (garage liability / garage keepers / dealers physical damage) and
+it's in the JSON export, but nothing on screen shows it. Needs a panel next
+to the risk flags and supplements ones.
 
-All identified from real training material, none modeled today:
+## Most supplemental forms aren't wired up
 
-- **Policy effective date** — no field exists.
-- **Business address / phone** — `FieldSection.location` is defined, unused.
-- **Deductible** — no field exists.
-- **Vehicle-type-mix cross-validation** — sales/repair revenue splits by
-  vehicle type (e.g. 90% passenger / 10% heavy) must total 100% *and* match
-  across sections, or underwriting kicks the application back. Today
-  `sales_revenue`/`service_repair_revenue` are plain currency fields with no
-  mix breakdown or cross-total check — this needs a new field shape plus a
-  cross-field validation rule (similar in spirit to the existing conflict
-  mechanism, but a hard validation rather than a contradiction).
-- **Floor-plan financing + lender-as-loss-payee** — if dealer inventory is
-  bank-financed, the lender must be listed as loss payee, called
-  "non-negotiable" in training. No such field exists.
-- **Structured loss detail + prior premium** — `prior_losses` is a boolean
-  today; real underwriting wants loss date, amount, description, and the
-  prior carrier's premium.
-- **Optional coverage add-ons** — wind/hail/flood, theft & vandalism, false
-  pretense coverage — none exist as fields.
+4 of the 27 `GARAGE_SUP_*` forms trigger automatically right now — heavy
+vehicle, towing, wholesale dealer, lessors risk. The rest (auto auction,
+valet, salvage yard, young driver, hired & non-owned auto, and so on) need
+fields added to the base catalog first, since there's nothing in the
+conversation yet that would signal them. Same process as always: read the
+real PDF, pick out what actually matters, add a trigger.
 
-## 5. Pre-call document ingestion
+## Fields the base application is missing
 
-Real Harper calls often arrive with a lead/submission document already in
-hand — seen directly in a real call transcript, where a partner rep read off
-a customer's name, state, and coverage type before handing off. Today the
-engine only builds the record live from the call. A pre-call document should
-feed the same extraction pipeline as one large one-shot chunk, populating
-fields as `needs_review` (confirmed live, never auto-trusted) rather than
-`filled`.
+All came out of the training material:
 
-## 6. Real telephony (Genesys)
+- Policy effective date — no field for it.
+- Business address and phone — the `location` section exists in the type
+  system, nothing uses it.
+- Deductible.
+- The vehicle-mix percentages should also cross-check against the
+  service/repair revenue split, not just sum to 100 on their own — needs
+  `dealer_plus_repair` support, which isn't scoped yet.
+- Floor-plan financing. If the inventory's bank-financed, the lender has to
+  be listed as loss payee — training calls this non-negotiable, and there's
+  no field for it at all.
+- Loss detail. Right now `prior_losses` is just a yes/no. Real underwriting
+  wants the date, the amount, a description, and the prior carrier's
+  premium.
+- Optional coverages — wind/hail/flood, theft & vandalism, false pretense —
+  none of these exist yet.
 
-`lib/transcriptSource.ts`'s `TranscriptSource` interface is the seam.
-`ManualTranscriptSource` and `DeepgramLiveSource` (mic/file replay) are local
-stand-ins; a `GenesysTranscriptSource` consuming a real call's dual-channel
-AudioHook feed would slot in without the engine or UI changing, and would
-also fully resolve the speaker-attribution guesswork described in the
-README's assumptions — each party would arrive on its own channel instead of
-one mixed stream needing diarization.
+## No way to start a call from an existing document
 
-## 7. Confidence threshold calibration
+Real Harper calls sometimes show up with a lead sheet already filled out —
+one of the real call transcripts has a partner rep reading off the
+customer's name, state, and coverage type before handing the call over.
+Right now the engine only ever builds the record from the live conversation.
+A document could feed the same extraction pipeline as one big chunk up
+front, with everything landing as `needs_review` instead of `filled` — still
+has to get confirmed live, just starts from something instead of nothing.
 
-`AUTO_FILL_THRESHOLD` (0.8) and `NEEDS_REVIEW_THRESHOLD` (0.55) in
-`lib/rules.ts` were picked, not fit to data. `npm run analyze-accuracy`
-exists to answer this once enough real `llm`-mode feedback accumulates in
-`data/feedback.jsonl` — revisit the thresholds once that report has signal.
+## Real telephony
 
-## 8. Real-call validation of the LLM extraction path
+`TranscriptSource` is the seam for this — `ManualTranscriptSource` and
+`DeepgramLiveSource` both implement it today as local stand-ins. A version
+that reads a real call's dual-channel Genesys feed would slot in the same
+way, and it'd also fix the speaker-attribution problem for good, since each
+party would just arrive on its own channel instead of getting guessed at
+from one mixed stream.
 
-The one real-call accuracy eval done so far ran the **mock** extractor
-against real (unscripted) Harper audio and found real gaps (misattributing
-agent dialogue as customer answers, low field coverage). That's expected of a
-demo heuristic — but it means the `llm` extraction path itself hasn't yet
-been validated end-to-end against real, messy call audio at volume. Worth
-doing before trusting it in production.
+## The confidence thresholds are guesses
+
+`AUTO_FILL_THRESHOLD` (0.8) and `NEEDS_REVIEW_THRESHOLD` (0.55) were picked,
+not measured. `npm run analyze-accuracy` exists to check them once there's
+enough real feedback data — right now there isn't.
+
+## The LLM extraction path hasn't been tested against real calls
+
+The one real-call accuracy check that's happened so far used the mock
+extractor against unscripted Harper audio, and it showed real problems —
+misattributing the agent's own lines to the customer, mostly. That's about
+what you'd expect from a demo heuristic. But it means nobody's actually
+checked how the real `llm` extraction path does against messy real audio at
+any volume, which is worth doing before trusting it.

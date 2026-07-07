@@ -1,77 +1,98 @@
 # Garage Intake Copilot
 
-Think of it as a **teleprompter for insurance agents** taking a garage / auto
-liability intake call. As the customer talks, the copilot listens, fills out
-the application in real time, and tells the agent what to ask next — before
-they'd have to think of it themselves. The transcript is just the input feed;
-the actual product is a deterministic workflow engine sitting behind it.
+A live teleprompter for insurance agents taking a garage / auto liability
+intake call. While the customer's talking, it fills out the application,
+catches problems, and tells the agent what to ask next before they'd have to
+think of it themselves.
 
-## Architecture
+The transcript is just the input. The actual product is a plain deterministic
+rules engine sitting behind it — the LLM's only job is to read the transcript
+and hand back candidate facts with evidence. It doesn't decide anything.
+
+## How a call moves through it
 
 ```
 Call audio / text
       │
       ▼
-Deepgram ASR              (live mic, or an uploaded/replayed recording;
-                            typed/simulated text enters here too)
+Deepgram ASR             live mic, an uploaded/replayed recording,
+                          or typed/simulated text
       │  transcript chunk
       ▼
-Extraction                (OpenAI LLM, or a deterministic mock fallback
-                            when no API key is set)
-      │  candidate facts + evidence, nothing else
+Extraction                OpenAI, or a deterministic mock when no key is set
+      │  candidate facts + evidence — nothing else
       ▼
-Deterministic engine       lib/rules.ts
-  • field status: filled / missing / low_confidence / needs_review / conflict
-  • knockout & appetite risk flags
-  • supplemental-form + coverage-line suggestions
-  • Ask-Next priority selection
+Rules engine (lib/rules.ts)
+  · field status: filled / missing / low_confidence / needs_review / conflict
+  · knockout & appetite risk flags
+  · which supplemental forms and coverage lines apply
+  · what to ask next, and why
       │
-      ├──> Agent: "Ask Next" — the preemptive prompt
-      ├──> Live autofilled application
-      └──> Export: filled PDF / structured JSON submission record
+      ├──> "Ask Next" — the prompt the agent sees
+      ├──> the application, filling itself out live
+      └──> PDF export / JSON submission record
 ```
 
-Everything reachable from the UI — mic, file replay, scripted demos — funnels
-through this one path (`lib/processIntakeText.ts` → `/api/process-chunk`), so
-there is exactly one extraction pipeline and one rules engine, regardless of
-where the words came from.
+Mic, file replay, and the scripted demos all funnel through the same code
+path (`lib/processIntakeText.ts` → `/api/process-chunk`). There's one
+extraction pipeline and one rules engine — the input source never leaks into
+either.
 
-## System design choices
+## Design choices
 
-- **The LLM only understands language.** It returns candidate facts with
-  evidence and nothing else — status, conflicts, risk, missing-field logic,
-  and next-question selection are deterministic TypeScript, never a prompt.
-- **The field catalog is curated, not scraped.** The real GARAGE_001 PDF has
-  998 generically-named form fields with no machine-readable labels; the
-  ~30 fields we model are hand-picked for what actually drives a conversation
-  and an underwriting decision.
-- **Supplemental forms and coverage lines are triggered, not chosen upfront.**
-  There's no "pick your forms" step — a business-type or field signal
-  (e.g. business type `tow`) surfaces the relevant `GARAGE_SUP_*`
-  questionnaire and the applicable coverage lines (garage liability / garage
-  keepers / dealers physical damage) as the call reveals them.
-- **Input sources are pluggable.** `TranscriptSource` is a generic interface;
-  manual text, live mic, and file replay all implement it today without the
-  engine or UI knowing which is active — a real telephony integration slots
-  in the same way.
-- **A feedback loop exists for calibration.** Every rep Confirm/Edit/conflict
-  resolution and every raw extraction candidate is logged, so confidence
-  thresholds can eventually be tuned from real data instead of picked by hand.
+**The LLM doesn't decide anything, it just reads.** Status, conflicts, risk
+flags, what to ask next — all of it is deterministic TypeScript in
+`lib/rules.ts`. If a decision needs a prompt to change, that's a bug.
 
-## Assumptions worth knowing
+**The field catalog isn't the real form.** GARAGE_001 the PDF has 998 form
+fields, and most of them are boilerplate or repeating rows with names like
+`Text47`. We picked the ~30 that actually drive a conversation and left the
+rest alone. New supplements get the same treatment — read the PDF, pick what
+matters, don't try to mirror it field-for-field.
 
-- **The mock extractor is a demo/dev stand-in, not a production-accuracy
-  proxy.** It's a regex heuristic tuned to two scripted demo calls; real
-  accuracy claims should come from the `llm` extractor path.
-- **Speaker attribution (agent vs. customer) is best-effort, not
-  identity-verified.** Diarization only clusters distinct voices in one mixed
-  audio stream — it has no concept of role. Extraction never depends on the
-  label being right; only the on-screen "who said it" attribution does.
-- **`filled` never downgrades**, conflicts are always resolved by the rep
-  (never auto-discarded), and business type is sticky — see `AGENTS.md` for
-  the full list of closed-loop invariants.
+**Nobody picks which forms apply up front.** Supplemental questionnaires and
+coverage lines (garage liability / garage keepers / dealers physical damage)
+get triggered by what comes up in the call — business type, a specific
+answer — not chosen at the start of the intake.
 
-## Run
+**Every fact carries the same shape, wherever it lives:**
+
+```
+{ value, status, confidence, evidence, conflict? }
+
+state.fields.legal_name             → this shape
+state.fields.sales_revenue          → this shape
+state.drivers[0].fields.driver_dob  → this shape
+```
+
+That's true for a top-level field and it's true for a driver's date of birth.
+It would've been simpler to store a driver as one flat object, but then a
+misheard DOB couldn't raise a conflict the same way everything else does —
+and that closed-loop behavior is most of what makes this useful. So the
+driver schedule reuses the same per-field tracking instead of inventing a
+second, weaker data model next to it.
+
+**Input sources are swappable.** `TranscriptSource` is one interface; manual
+text, mic, and file replay all implement it today. A real telephony
+integration is the same shape of work, not a rewrite.
+
+**There's a feedback loop, because the thresholds are guesses right now.**
+Every Confirm, Edit, and conflict resolution gets logged, same for every raw
+extraction candidate. `AUTO_FILL_THRESHOLD` and `NEEDS_REVIEW_THRESHOLD` in
+`lib/rules.ts` were picked, not fit — the logging exists so they can
+eventually be checked against real outcomes instead.
+
+## Worth knowing before you trust it
+
+- Speaker labels (agent vs. customer) are best-effort. Diarization just
+  clusters distinct voices in one audio stream; it has no idea who's who.
+  Extraction doesn't care which label is attached, but the "who said it"
+  quote shown to the rep can be wrong.
+- `filled` never downgrades, conflicts always go to the rep instead of being
+  auto-resolved, and business type is sticky once set. Full list of these in
+  `AGENTS.md`.
+
+## Running it
 
 ```bash
 npm install
@@ -79,19 +100,13 @@ npm run dev      # http://localhost:3000
 npm test         # offline engine tests, no keys required
 ```
 
-Works fully offline with the deterministic mock extractor. For the real
-experience, set `OPENAI_API_KEY` (extraction) and `DEEPGRAM_API_KEY` (live
-transcription) in `.env.local` — see `.env.example` and `AGENTS.md` for setup
-details and gotchas.
+It works fully offline on the mock extractor. For the real thing, set
+`OPENAI_API_KEY` and `DEEPGRAM_API_KEY` in `.env.local` — see `.env.example`
+and `AGENTS.md` for the setup gotchas (the Deepgram one especially, it'll
+cost you twenty minutes if you hit it blind).
 
-## What's next
+## What's not built yet
 
-See **[futurescope.md](./futurescope.md)** for the roadmap — the driver/team
-section (a real underwriting blocker we don't model yet), remaining
-supplemental forms, coverage-line UI, pre-call document ingestion, and the
-path to real telephony.
-
-## Contributing
-
-See **`AGENTS.md`** for the non-negotiable architecture rules, closed-loop
-invariants, and conventions this codebase depends on.
+[`futurescope.md`](./futurescope.md) — the driver section only handles one
+driver right now, most of the 27 supplemental forms aren't wired up, the
+coverage-line recommendation has no UI yet, and a few other things.
