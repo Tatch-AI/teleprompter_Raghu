@@ -1,6 +1,7 @@
 "use client";
 
 import { TranscriptChunk } from "@/lib/types";
+import { DemoTranscript } from "@/lib/mockTranscript";
 
 export default function TranscriptPanel({
   chunks,
@@ -12,6 +13,10 @@ export default function TranscriptPanel({
   hasMoreMock,
   nextSpeaker,
   onSpeakerChange,
+  demos,
+  activeDemoId,
+  onDemoChange,
+  demoProgress,
 }: {
   chunks: TranscriptChunk[];
   draft: string;
@@ -22,7 +27,12 @@ export default function TranscriptPanel({
   hasMoreMock: boolean;
   nextSpeaker: "agent" | "customer";
   onSpeakerChange: (speaker: "agent" | "customer") => void;
+  demos: DemoTranscript[];
+  activeDemoId: string;
+  onDemoChange: (id: string) => void;
+  demoProgress: { played: number; total: number };
 }) {
+  const activeDemo = demos.find((d) => d.id === activeDemoId) ?? demos[0];
   return (
     <section className="flex h-full flex-col rounded-2xl border border-slate-700/60 bg-slate-900/60">
       <header className="flex items-center justify-between border-b border-slate-700/60 px-4 py-3">
@@ -54,6 +64,26 @@ export default function TranscriptPanel({
       </div>
 
       <div className="space-y-2 border-t border-slate-700/60 p-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <span>Demo call:</span>
+          <select
+            value={activeDemoId}
+            onChange={(e) => onDemoChange(e.target.value)}
+            className="rounded-lg border border-slate-700/60 bg-slate-950/60 px-2 py-1 text-xs text-slate-100 outline-none focus:border-indigo-500/60"
+          >
+            {demos.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-slate-500">
+            {demoProgress.played}/{demoProgress.total} played
+          </span>
+        </div>
+        {activeDemo?.description && (
+          <p className="text-[11px] leading-snug text-slate-500">{activeDemo.description}</p>
+        )}
         <div className="flex items-center gap-2 text-xs text-slate-400">
           <span>Speaker:</span>
           {(["customer", "agent"] as const).map((s) => (

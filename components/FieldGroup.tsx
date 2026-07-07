@@ -10,12 +10,14 @@ export default function FieldGroup({
   fields,
   onConfirm,
   onResolveConflict,
+  onEdit,
 }: {
   section: string;
   defs: FieldDefinition[];
   fields: Record<string, FieldState>;
   onConfirm: (fieldId: string) => void;
   onResolveConflict: (fieldId: string, choice: "new" | "old" | "manual", manualValue?: string) => void;
+  onEdit: (fieldId: string, value: string) => void;
 }) {
   if (defs.length === 0) return null;
   const filled = defs.filter((d) => {
@@ -43,6 +45,7 @@ export default function FieldGroup({
               state={fields[def.id]}
               onConfirm={onConfirm}
               onResolveConflict={onResolveConflict}
+              onEdit={onEdit}
             />
           ))}
       </div>

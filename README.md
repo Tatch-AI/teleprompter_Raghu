@@ -54,7 +54,48 @@ Extraction uses the deterministic mock by default. To use a real LLM, set an
 `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) in `.env` — see `.env.example`.
 On an LLM failure the API does a silent one-shot retry, then a safe no-op.
 
-Click **Simulate next** to advance the scripted demo call, or type/paste chunks.
+Pick a **Demo call** in the transcript panel. Two demos ship:
+
+- **Valley Auto Sales** — clean dealer call (plate-count conflict, ride-along knockout).
+- **Dexter's Auto (real call)** — condensed from a real Harper intake. Exercises a
+  coverage-type mix-up (garage keepers vs. general liability), a `$35 → $35,000`
+  revenue conflict, a two → three dealer-plate conflict, and a
+  self-repossession-without-buy-here-pay-here specialty flag.
+
+There are three ways to run a demo call through the app, in increasing order of
+realism:
+
+1. **Simulate next** — pushes the scripted transcript text straight into the
+   engine, one line at a time. Fastest way to step through the logic; no audio
+   or ASR involved.
+2. **Play synthesized call** — the recommended way to demo this end to end.
+   Streams pre-generated, two-voice TTS audio for the selected demo through
+   the *same* live-audio path used for a real call, so it exercises real
+   Deepgram ASR, not scripted text. Generate the audio once:
+   ```bash
+   npm run synthesize-demo-audio                 # both demos
+   npm run synthesize-demo-audio -- valley_auto   # just one
+   ```
+   Requires `OPENAI_API_KEY` (TTS) and `ffmpeg` on PATH (stitches the
+   per-line audio with silence gaps into `public/demo-audio/<id>.mp3`).
+3. **Go live (mic) / Stream recording** — real microphone audio or an
+   uploaded real recording, streamed to Deepgram live. This is the actual
+   production path; the other two are demo/dev conveniences that happen to
+   share it.
+
+All three ultimately call the same `/api/process-chunk` engine — the only
+difference is what produces the transcript text.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs `scripts/tests/engine.test.ts` (via the `tsx` ESM loader — no server, no LLM
+key). It plays the Dexter's Auto call through the mock extractor + deterministic
+engine and asserts the extracted record, the two conflicts, the specialty risk
+flag, and the **Ask Next** priority order (conflicts → risk → missing field).
 
 ## Layout
 
@@ -70,10 +111,14 @@ lib/
   rules.ts                     Deterministic engine (the product)
   llmExtraction.ts             LLM extractor + deterministic mock fallback
   transcriptSource.ts          Generic input interface (Deepgram-ready)
-  initialState.ts, formatters.ts, mockTranscript.ts
+  initialState.ts, formatters.ts
+  mockTranscript.ts            Selectable demo calls (Valley Auto, Dexter's Auto)
 components/                     Ask Next, Transcript, Application, Fields,
                                 Conflict, Risk, Pending steps, Debug JSON
 scripts/demoWalkthrough.mjs     Drives the scripted call through the API
+scripts/tests/engine.test.ts    Offline engine test for the Dexter's Auto call
+scripts/synthesizeDemoCalls.ts  Generates public/demo-audio/*.mp3 via OpenAI TTS + ffmpeg
+public/demo-audio/              Generated demo call audio (git-ignored, run the script to produce it)
 ```
 
 ## Extending to live audio
