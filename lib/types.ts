@@ -126,6 +126,26 @@ export interface RiskFlag {
   reason: string;
 }
 
+export interface SuggestedSupplement {
+  id: string;
+  ruleId: string;
+  formId: string;
+  filename: string;
+  label: string;
+  fieldId: string;
+  detected: boolean;
+  acknowledged: boolean;
+  validated: boolean;
+  reason: string;
+}
+
+export type GarageCoverageLine = "garage_liability" | "garage_keepers" | "dealers_physical_damage";
+
+export interface CoverageLineRecommendation {
+  line: GarageCoverageLine;
+  reason: string;
+}
+
 export interface IntakeState {
   intakeId: string;
   vertical: "garage";
@@ -138,6 +158,8 @@ export interface IntakeState {
   missingRequiredFieldIds: string[];
   conflicts: ConflictRecord[];
   riskFlags: RiskFlag[];
+  suggestedSupplements: SuggestedSupplement[];
+  recommendedCoverageLines: CoverageLineRecommendation[];
   completedStepIds: string[];
   /** Monotonic counter; stale responses are dropped by the client. */
   generation: number;
@@ -200,6 +222,45 @@ export interface NextBestQuestion {
   priority: "high" | "medium" | "low";
   reason: string;
   category: NextQuestionCategory;
+}
+
+export type CorrectionAction = "accept" | "edit" | "resolve_conflict";
+
+// One human touch on a field. Corrections (changed=true) are the high-value
+// training signal; accepts (changed=false) confirm the machine got it right.
+export interface FeedbackEvent {
+  id: string;
+  intakeId: string;
+  fieldId: string;
+  fieldLabel: string;
+  action: CorrectionAction;
+  machineValue: unknown;
+  correctedValue: unknown;
+  changed: boolean;
+  machineConfidence: number;
+  /** Which extractor produced machineValue — mock confidences are hand-set heuristics, not calibrated probabilities, so this must stay separable from llm confidences in analysis. */
+  extractorMode: "llm" | "mock" | null;
+  businessType: GarageBusinessType | null;
+  evidenceQuote?: string;
+  createdAt: string;
+}
+
+// One extraction candidate as it came out of a single extraction pass, before
+// any human touched it. Append-only — unlike FieldState, this preserves every
+// pass over a field, not just the latest, so confidence calibration can be
+// measured against the full extraction history rather than a single snapshot.
+export interface ExtractionEvent {
+  id: string;
+  intakeId: string;
+  chunkId: string;
+  fieldId: string;
+  value: unknown;
+  normalizedValue?: unknown;
+  confidence: number;
+  evidenceQuote: string;
+  extractorMode: "llm" | "mock";
+  businessType: GarageBusinessType | null;
+  createdAt: string;
 }
 
 export interface ProcessChunkRequest {

@@ -25,6 +25,12 @@ export default function DebugJsonPanel({
       severity: f.severity,
       resolved: f.resolved,
     })),
+    suggestedSupplements: state.suggestedSupplements.map((s) => ({
+      ruleId: s.ruleId,
+      formId: s.formId,
+      validated: s.validated,
+      acknowledged: s.acknowledged,
+    })),
     fields: Object.fromEntries(
       Object.values(state.fields)
         .filter((f) => f.everSeen)

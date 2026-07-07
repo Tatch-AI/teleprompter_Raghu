@@ -32,6 +32,8 @@ export function createInitialIntakeState(): IntakeState {
     ),
     conflicts: [],
     riskFlags: [],
+    suggestedSupplements: [],
+    recommendedCoverageLines: [],
     completedStepIds: [],
     generation: 0,
     updatedAt: new Date().toISOString(),

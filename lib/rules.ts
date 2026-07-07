@@ -14,12 +14,15 @@ import {
   IntakeState,
   NextBestQuestion,
   RiskFlag,
+  SuggestedSupplement,
   TalkTrackStep,
   TranscriptChunk,
 } from "./types";
 import { FIELD_BY_ID, GARAGE_FIELD_DEFINITIONS, KNOWN_FIELD_IDS } from "./garageFieldDefinitions";
 import { GARAGE_TALK_TRACK } from "./garageTalkTrack";
 import { GARAGE_RISK_RULES } from "./garageRiskRules";
+import { GARAGE_SUPPLEMENT_RULES } from "./garageSupplementRules";
+import { getRecommendedCoverageLines } from "./garageCoverageRules";
 import { formatFieldValue } from "./formatters";
 
 export const AUTO_FILL_THRESHOLD = 0.8;
@@ -421,6 +424,37 @@ export function detectRiskFlags(state: IntakeState, previous: RiskFlag[]): RiskF
   return flags;
 }
 
+export function detectSuggestedSupplements(
+  state: IntakeState,
+  previous: SuggestedSupplement[],
+): SuggestedSupplement[] {
+  const prevAck: Record<string, boolean> = {};
+  for (const s of previous) prevAck[s.ruleId] = s.acknowledged;
+
+  const suggestions: SuggestedSupplement[] = [];
+  for (const rule of GARAGE_SUPPLEMENT_RULES) {
+    const holds =
+      rule.fieldId === "business_type"
+        ? state.businessType === rule.triggerValue
+        : filledEquals(state.fields[rule.fieldId], rule.triggerValue);
+    if (!holds) continue;
+
+    suggestions.push({
+      id: `supplement-${rule.id}`,
+      ruleId: rule.id,
+      formId: rule.formId,
+      filename: rule.filename,
+      label: rule.label,
+      fieldId: rule.fieldId,
+      detected: true,
+      acknowledged: prevAck[rule.id] ?? false,
+      validated: rule.validated,
+      reason: rule.reason,
+    });
+  }
+  return suggestions;
+}
+
 // ---------------------------------------------------------------------------
 // Next-best-question selection (strict priority order)
 // ---------------------------------------------------------------------------
@@ -580,6 +614,8 @@ export function recompute(state: IntakeState): {
     missingRequiredFieldIds: computeMissingRequiredFields(state),
     completedStepIds: computeCompletedSteps(state),
     riskFlags: detectRiskFlags(state, state.riskFlags),
+    suggestedSupplements: detectSuggestedSupplements(state, state.suggestedSupplements),
+    recommendedCoverageLines: getRecommendedCoverageLines(state.businessType),
     updatedAt: new Date().toISOString(),
   };
 
@@ -644,6 +680,48 @@ export function resolveConflict(
   return recompute({ ...state, fields });
 }
 
+// Rep manually overrides a value (any field, any time). Empty clears the field.
+export function editField(
+  state: IntakeState,
+  fieldId: string,
+  rawValue: unknown,
+): { state: IntakeState; nextBestQuestion: NextBestQuestion; reasons: string[] } {
+  const def = FIELD_BY_ID[fieldId];
+  const fs = { ...state.fields[fieldId] };
+  if (!def) return recompute(state);
+
+  const normalized = normalizeCandidate(def, rawValue);
+  if (isEmptyValue(normalized) && def.type !== "boolean") {
+    // Clear the field back to missing.
+    fs.value = null;
+    fs.normalizedValue = null;
+    fs.status = "missing";
+    fs.confirmed = false;
+    fs.confidence = 0;
+    fs.conflict = undefined;
+    fs.needsReviewReason = undefined;
+  } else {
+    fs.value = rawValue;
+    fs.normalizedValue = normalized;
+    fs.status = "filled";
+    fs.confirmed = true;
+    fs.everSeen = true;
+    fs.bestConfidence = 1;
+    fs.confidence = 1;
+    fs.conflict = undefined;
+    fs.needsReviewReason = undefined;
+    const manualEvidence: EvidenceSnippet = {
+      transcriptChunkId: "manual",
+      quote: `Rep entered: ${String(rawValue)}`,
+      speaker: "agent",
+    };
+    fs.evidence = [...fs.evidence, manualEvidence].slice(-4);
+  }
+  fs.lastUpdatedAt = new Date().toISOString();
+  const fields = { ...state.fields, [fieldId]: fs };
+  return recompute({ ...state, fields });
+}
+
 export function confirmField(
   state: IntakeState,
   fieldId: string,
@@ -667,4 +745,14 @@ export function acknowledgeRisk(
     f.ruleId === ruleId ? { ...f, resolved: true } : f,
   );
   return recompute({ ...state, riskFlags });
+}
+
+export function acknowledgeSupplement(
+  state: IntakeState,
+  ruleId: string,
+): { state: IntakeState; nextBestQuestion: NextBestQuestion; reasons: string[] } {
+  const suggestedSupplements = state.suggestedSupplements.map((s) =>
+    s.ruleId === ruleId ? { ...s, acknowledged: true } : s,
+  );
+  return recompute({ ...state, suggestedSupplements });
 }

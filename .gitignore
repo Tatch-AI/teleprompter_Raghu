@@ -26,3 +26,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# runtime feedback store (may contain PII)
+/data/
+
+# generated demo call audio (run `npm run synthesize-demo-audio` to produce)
+/public/demo-audio/
+
+# real sample forms, real Harper call recordings, and training notes (PII)
+/garage_auto/
+
+# personal working notes, not for the team
+/BACKEND_NOTES.md
+
+# Claude Code agent worktree metadata
+/.claude/worktrees/

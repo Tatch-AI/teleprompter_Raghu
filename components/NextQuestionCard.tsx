@@ -1,6 +1,7 @@
 "use client";
 
 import { NextBestQuestion } from "@/lib/types";
+import { FIELD_BY_ID } from "@/lib/garageFieldDefinitions";
 
 const CATEGORY_LABEL: Record<NextBestQuestion["category"], string> = {
   business_type: "Business type",
@@ -26,13 +27,11 @@ const PRIORITY_CLASS: Record<NextBestQuestion["priority"], string> = {
   low: "bg-emerald-500/15 text-emerald-300",
 };
 
-export default function NextQuestionCard({
-  question,
-  extractorMode,
-}: {
-  question: NextBestQuestion | null;
-  extractorMode: "llm" | "mock" | null;
-}) {
+export default function NextQuestionCard({ question }: { question: NextBestQuestion | null }) {
+  const fieldLabels = (question?.fieldIds ?? [])
+    .map((id) => FIELD_BY_ID[id]?.label)
+    .filter((label): label is string => Boolean(label));
+
   return (
     <section className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/70 to-slate-900/80 p-5 shadow-lg shadow-indigo-950/40">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -53,11 +52,6 @@ export default function NextQuestionCard({
             </span>
           </>
         )}
-        {extractorMode && (
-          <span className="ml-auto rounded-full border border-slate-600/60 bg-slate-800/60 px-2.5 py-0.5 text-[11px] font-medium text-slate-300">
-            extractor: {extractorMode === "llm" ? "LLM" : "mock"}
-          </span>
-        )}
       </div>
 
       {question ? (
@@ -69,6 +63,9 @@ export default function NextQuestionCard({
             <p className="mt-2 text-sm text-indigo-200/80">
               <span className="font-semibold text-indigo-200">Why we ask: </span>
               {question.whyWeAsk}
+              {fieldLabels.length > 0 && (
+                <span className="text-indigo-300/70"> (fields needed: {fieldLabels.join(", ")})</span>
+              )}
             </p>
           )}
           <p className="mt-2 text-xs text-slate-400">{question.reason}</p>
