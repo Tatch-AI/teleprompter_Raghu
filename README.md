@@ -72,6 +72,14 @@ and that closed-loop behavior is most of what makes this useful. So the
 driver schedule reuses the same per-field tracking instead of inventing a
 second, weaker data model next to it.
 
+**A wrong-looking answer isn't always a conflict.** A risk flag means one
+field's value is a problem by itself. A conflict means two things said about
+the same fact disagree. Neither of those covers "each of these three
+percentages is individually fine, but they add up to 85 instead of 100" — so
+that's a third kind of check, validation issues, done as a generic
+"these fields have to add up to X" rule rather than a one-off for vehicle
+mix specifically.
+
 **Input sources are swappable.** `TranscriptSource` is one interface; manual
 text, mic, and file replay all implement it today. A real telephony
 integration is the same shape of work, not a rewrite.
