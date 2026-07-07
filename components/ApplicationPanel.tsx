@@ -24,6 +24,7 @@ export default function ApplicationPanel({
   completeness,
   onConfirm,
   onResolveConflict,
+  onEdit,
 }: {
   applicableDefs: FieldDefinition[];
   fields: Record<string, FieldState>;
@@ -31,6 +32,7 @@ export default function ApplicationPanel({
   completeness: { filled: number; total: number };
   onConfirm: (fieldId: string) => void;
   onResolveConflict: (fieldId: string, choice: "new" | "old" | "manual", manualValue?: string) => void;
+  onEdit: (fieldId: string, value: string) => void;
 }) {
   const bySection = SECTION_ORDER.map((section) => ({
     section,
@@ -70,6 +72,7 @@ export default function ApplicationPanel({
             fields={fields}
             onConfirm={onConfirm}
             onResolveConflict={onResolveConflict}
+            onEdit={onEdit}
           />
         ))}
       </div>

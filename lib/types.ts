@@ -202,6 +202,25 @@ export interface NextBestQuestion {
   category: NextQuestionCategory;
 }
 
+export type CorrectionAction = "accept" | "edit" | "resolve_conflict";
+
+// One human touch on a field. Corrections (changed=true) are the high-value
+// training signal; accepts (changed=false) confirm the machine got it right.
+export interface FeedbackEvent {
+  id: string;
+  intakeId: string;
+  fieldId: string;
+  fieldLabel: string;
+  action: CorrectionAction;
+  machineValue: unknown;
+  correctedValue: unknown;
+  changed: boolean;
+  machineConfidence: number;
+  businessType: GarageBusinessType | null;
+  evidenceQuote?: string;
+  createdAt: string;
+}
+
 export interface ProcessChunkRequest {
   transcriptChunkText: string;
   speaker?: "agent" | "customer" | "unknown";

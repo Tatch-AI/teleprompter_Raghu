@@ -216,10 +216,16 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
   // suffix. Requiring the word right before the suffix to be capitalized avoids
   // matching filler like "...twelve years. We're an LLC".
   const nameMatch = chunkText.match(
-    /\b([A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+){0,4})\s+(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation)\b/,
+    /\b([A-Z][A-Za-z0-9&.'’\-]+(?:\s+[A-Z][A-Za-z0-9&.'’\-]+){0,4})\s+(LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation)\b/,
   );
   if (nameMatch) {
-    const fullName = `${nameMatch[1]} ${nameMatch[2]}`.trim();
+    // Allowing apostrophes (for names like "Dexter's Auto") can pull in a leading
+    // contraction ("We're Valley Auto..."); strip common ones so the name is clean.
+    const lead = nameMatch[1].replace(
+      /^(?:we're|i'm|it's|that's|they're|he's|she's|here's|there's|you're|we've|i've)\s+/i,
+      "",
+    );
+    const fullName = `${lead} ${nameMatch[2]}`.trim();
     fields.push(candidate("legal_name", fullName, 0.9, fullName));
   }
 
@@ -238,7 +244,9 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
   }
 
   // Years in business
-  const yib = text.match(/(?:been (?:open|around|in business)|open)\s+(?:about\s+)?([a-z]+|\d+)\s+years?/);
+  const yib = text.match(
+    /(?:been (?:open|around|in business)|in business)\s+(?:for\s+|about\s+)*([a-z]+|\d+)\s+years?/,
+  );
   if (yib) fields.push(candidate("years_in_business", yib[1], 0.85, yib[0]));
 
   // Owner experience
@@ -248,7 +256,7 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
   // Entity type
   if (/\bllc\b|l\.l\.c\./.test(text)) fields.push(candidate("entity_type", "LLC", 0.9, "LLC"));
   else if (/corporation|\bcorp\b|\binc\b/.test(text)) fields.push(candidate("entity_type", "Corporation", 0.85, "corporation"));
-  else if (/sole prop|just me|individual|myself/.test(text)) fields.push(candidate("entity_type", "Sole proprietor", 0.8, "individual"));
+  else if (/sole prop(?:rietor)?|\bjust me\b|it'?s just me|as an individual/.test(text)) fields.push(candidate("entity_type", "Sole proprietor", 0.8, "sole proprietor"));
   else if (/partnership/.test(text)) fields.push(candidate("entity_type", "Partnership", 0.85, "partnership"));
 
   // Why shopping
@@ -256,12 +264,14 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
     fields.push(candidate("why_shopping", chunkText.trim(), 0.7, chunkText.trim()));
   }
 
-  // Vehicles sold per year
-  const sold = text.match(/(?:sell|sold|do)\s+(?:around|about|roughly)?\s*(\d[\d,]*)\s+(?:vehicles|cars|units)/);
+  // Vehicles sold per year (accepts digits or word-numbers, with soft hedges)
+  const sold = text.match(
+    /(?:sell|sold|do|move)\s+(?:around|about|roughly|maybe|up to)?\s*(\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty)\s+(?:vehicles|cars|units)/,
+  );
   if (sold) fields.push(candidate("vehicles_sold_per_year", sold[1].replace(/,/g, ""), 0.9, sold[0]));
 
   // Sales revenue
-  const rev = text.match(/revenue(?: is)?(?: about| around| roughly)?\s+\$?([\d.]+)\s*(million|thousand|k|m|billion)?/);
+  const rev = text.match(/revenue(?: is)?(?: about| around| roughly)?\s+\$?(\d[\d,]*(?:\.\d+)?)\s*(million|thousand|k|m|billion)?/);
   if (rev) {
     const unit = rev[2] ? ` ${rev[2]}` : "";
     fields.push(candidate("sales_revenue", `${rev[1]}${unit}`, 0.85, rev[0]));
@@ -279,6 +289,26 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
   if (/plates?.*(rent|loan|lease)|(rent|loan|lease).*plates?|rent or loan them|loan them out/.test(text)) {
     const loaned = !hasNegation(text, "rent") && !hasNegation(text, "loan") && !/never|don't|do not/.test(text);
     fields.push(candidate("plates_loaned_or_rented", loaned, 0.9, "rent or loan them out"));
+  }
+
+  // Buy-here-pay-here financing (dealer carries the paper)
+  if (/buy[ -]?here[ -]?pay[ -]?here|carry the paper|finance (my|their|the) own|finance through|finance with|outside financing|credit acceptance/.test(text)) {
+    const carriesPaper =
+      /buy[ -]?here[ -]?pay[ -]?here|carry the paper|finance (my|their|the) own/.test(text) &&
+      !/no buy[ -]?here[ -]?pay[ -]?here|not buy[ -]?here|don't finance|outside financing|finance through|finance with|credit acceptance/.test(text);
+    fields.push(candidate("buy_here_pay_here", carriesPaper, 0.85, "buy here pay here"));
+  }
+
+  // Self repossession
+  if (/repossess|\brepo\b/.test(text)) {
+    const repos = !/(no repo|don't repossess|do not repossess|never repossess|don't repo)/.test(text);
+    fields.push(candidate("self_repossession", repos, 0.85, "repossess vehicles I sell myself"));
+  }
+
+  // Titles transfer promptly
+  if (/titles?\s+transfer|transfer\s+(the\s+)?titles?/.test(text)) {
+    const promptly = !/(don't transfer|do not transfer|late|delay(ed)?|not promptly)/.test(text);
+    fields.push(candidate("titles_transfer_promptly", promptly, 0.85, "titles transfer promptly"));
   }
 
   // Test drives
@@ -312,14 +342,18 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
     fields.push(candidate("rideshare_use_owned_autos", rideshare, 0.85, "rideshare"));
   }
 
-  // Lot security
-  if (/(fenced|gated|cameras|open lot|in a building|secured)/.test(text)) {
+  // Lot security (negation-aware: "not fenced or gated" should not report fenced)
+  if (/(fenced|gated|cameras?|open lot|lot is open|it's open|just open|in a building|secured)/.test(text)) {
     const secBits: string[] = [];
-    if (/fenced/.test(text)) secBits.push("fenced");
-    if (/gated/.test(text)) secBits.push("gated");
-    if (/cameras/.test(text)) secBits.push("cameras");
-    if (/open lot/.test(text)) secBits.push("open lot");
+    const notFenced = /not\s+fenced|no\s+fence|isn'?t\s+fenced|not\s+fenced\s+or\s+gated/.test(text);
+    const notGated = /not\s+gated|no\s+gate|isn'?t\s+gated|not\s+fenced\s+or\s+gated/.test(text);
+    if (/fenced/.test(text) && !notFenced) secBits.push("fenced");
+    if (/gated/.test(text) && !notGated) secBits.push("gated");
+    if (/cameras?/.test(text)) secBits.push("cameras");
     if (/in a building/.test(text)) secBits.push("in a building");
+    if (/open lot|lot is open|it's open|just open|is open\b|not fenced|not gated/.test(text)) {
+      secBits.push("open lot");
+    }
     if (secBits.length) fields.push(candidate("lot_security", secBits.join(", "), 0.85, "lot security"));
   }
 
@@ -329,9 +363,21 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
     fields.push(candidate("keys_handling", (keyMatch?.[0] ?? chunkText).trim(), 0.85, "keys handling"));
   }
 
-  // Desired liability limits
-  const limits = text.match(/(\$?[\d.]+\s*[mk]?\s*\/\s*\$?[\d.]+\s*[mk]?|state minimum|\$1m\/\$2m|1m\/2m)/);
-  if (limits) fields.push(candidate("desired_liability_limits", limits[0], 0.8, limits[0]));
+  // Desired liability limits (split limits, or a single "state minimum of $X")
+  const limits = text.match(/(\$?[\d.]+\s*[mk]?\s*\/\s*\$?[\d.]+\s*[mk]?|\$1m\/\$2m|1m\/2m)/);
+  if (limits) {
+    fields.push(candidate("desired_liability_limits", limits[0], 0.8, limits[0]));
+  } else {
+    const minLimit = text.match(/(?:state\s+)?minimum(?:\s+of)?\s+\$?([\d,]+)\s*(k|thousand|m|million)?/);
+    if (minLimit) {
+      const unit = minLimit[2] ? ` ${minLimit[2]}` : "";
+      fields.push(
+        candidate("desired_liability_limits", `${minLimit[1]}${unit} (state minimum)`, 0.8, minLimit[0]),
+      );
+    } else if (/state minimum/.test(text)) {
+      fields.push(candidate("desired_liability_limits", "state minimum", 0.75, "state minimum"));
+    }
+  }
 
   // Current insurance / carrier
   if (/insured with|currently insured|current carrier|we have coverage/.test(text)) {

@@ -644,6 +644,48 @@ export function resolveConflict(
   return recompute({ ...state, fields });
 }
 
+// Rep manually overrides a value (any field, any time). Empty clears the field.
+export function editField(
+  state: IntakeState,
+  fieldId: string,
+  rawValue: unknown,
+): { state: IntakeState; nextBestQuestion: NextBestQuestion; reasons: string[] } {
+  const def = FIELD_BY_ID[fieldId];
+  const fs = { ...state.fields[fieldId] };
+  if (!def) return recompute(state);
+
+  const normalized = normalizeCandidate(def, rawValue);
+  if (isEmptyValue(normalized) && def.type !== "boolean") {
+    // Clear the field back to missing.
+    fs.value = null;
+    fs.normalizedValue = null;
+    fs.status = "missing";
+    fs.confirmed = false;
+    fs.confidence = 0;
+    fs.conflict = undefined;
+    fs.needsReviewReason = undefined;
+  } else {
+    fs.value = rawValue;
+    fs.normalizedValue = normalized;
+    fs.status = "filled";
+    fs.confirmed = true;
+    fs.everSeen = true;
+    fs.bestConfidence = 1;
+    fs.confidence = 1;
+    fs.conflict = undefined;
+    fs.needsReviewReason = undefined;
+    const manualEvidence: EvidenceSnippet = {
+      transcriptChunkId: "manual",
+      quote: `Rep entered: ${String(rawValue)}`,
+      speaker: "agent",
+    };
+    fs.evidence = [...fs.evidence, manualEvidence].slice(-4);
+  }
+  fs.lastUpdatedAt = new Date().toISOString();
+  const fields = { ...state.fields, [fieldId]: fs };
+  return recompute({ ...state, fields });
+}
+
 export function confirmField(
   state: IntakeState,
   fieldId: string,
