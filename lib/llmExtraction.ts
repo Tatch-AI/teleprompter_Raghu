@@ -6,6 +6,7 @@ import {
 } from "./types";
 import { GARAGE_FIELD_DEFINITIONS, KNOWN_FIELD_IDS } from "./garageFieldDefinitions";
 import { GARAGE_RISK_RULES } from "./garageRiskRules";
+import { DRIVER_FIELD_DEFINITIONS, DRIVER_KNOWN_FIELD_IDS } from "./garageDriverFields";
 
 export const EXTRACTION_SYSTEM_PROMPT = `You are an insurance intake extraction assistant for a commercial insurance brokerage.
 
@@ -25,6 +26,7 @@ Rules:
 
 const EMPTY_RESULT: ExtractionResult = {
   extractedFields: [],
+  driverFields: [],
   potentialBusinessType: null,
   potentialConflicts: [],
   riskSignals: [],
@@ -44,6 +46,12 @@ export function buildUserPrompt(state: IntakeState, transcriptChunk: string): st
       .filter((f) => f.value !== null)
       .map((f) => [f.fieldId, { value: f.value, status: f.status }]),
   );
+  const driverFieldDefs = DRIVER_FIELD_DEFINITIONS.map((f) => ({
+    id: f.id,
+    label: f.label,
+    type: f.type,
+    required: f.required,
+  }));
 
   return `Vertical: GARAGE_001
 
@@ -55,18 +63,26 @@ ${JSON.stringify(currentValues, null, 2)}
 Field definitions:
 ${JSON.stringify(compactFields)}
 
+Driver field definitions (a separate schedule, one entry per named driver — not part of the fields above):
+${JSON.stringify(driverFieldDefs)}
+
 Risk rules:
 ${JSON.stringify(GARAGE_RISK_RULES.map((r) => ({ id: r.id, fieldId: r.fieldId, triggerValue: r.triggerValue })))}
 
 New transcript chunk:
 ${transcriptChunk}
 
-Extract any supported application fields from this transcript chunk.
+Extract any supported application fields from this transcript chunk. Also extract any driver
+fields (name/DOB/license) using the driver field definitions above — put those in
+"driverFields", not "extractedFields".
 
 Return JSON with this exact shape:
 {
   "extractedFields": [
     { "fieldId": "string", "value": "any", "normalizedValue": "any", "confidence": 0.0, "evidenceQuote": "exact quote", "reasoning": "short" }
+  ],
+  "driverFields": [
+    { "fieldId": "driver_name | driver_dob | driver_license_number | driver_license_state", "value": "any", "confidence": 0.0, "evidenceQuote": "exact quote", "reasoning": "short" }
   ],
   "potentialBusinessType": "dealer | dealer_plus_repair | repair | body | heavy | tow | parking | car_wash | mixed | null",
   "businessTypeConfidence": 0.0,
@@ -83,12 +99,18 @@ function sanitizeResult(raw: unknown): ExtractionResult {
         (c) => c && typeof c.fieldId === "string" && KNOWN_FIELD_IDS.has(c.fieldId),
       )
     : [];
+  const driverFields = Array.isArray(obj.driverFields)
+    ? (obj.driverFields as ExtractedFieldCandidate[]).filter(
+        (c) => c && typeof c.fieldId === "string" && DRIVER_KNOWN_FIELD_IDS.has(c.fieldId),
+      )
+    : [];
   const businessType =
     typeof obj.potentialBusinessType === "string" && obj.potentialBusinessType !== "null"
       ? (obj.potentialBusinessType as GarageBusinessType)
       : null;
   return {
     extractedFields,
+    driverFields,
     potentialBusinessType: businessType,
     businessTypeConfidence:
       typeof obj.businessTypeConfidence === "number" ? obj.businessTypeConfidence : undefined,

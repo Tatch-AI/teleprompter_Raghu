@@ -20,7 +20,14 @@ of this. Ordered roughly by how much it would hurt in production.
   not a flat object: each driver's name/DOB/license gets the same
   status/confidence/evidence/conflict tracking as any field (see README's
   design choices). Knockout (`no_complete_driver`) fires once business type
-  is known and nobody has all three. Read-only panel.
+  is known and nobody has all three. Read-only panel. Caught by smoke-testing
+  the real `llm` path (not the mock extractor, which is all the test suite
+  exercises): `buildUserPrompt` only ever serialized the top-level field
+  catalog, so the real model had no idea driver fields existed and the
+  knockout fired on every live call regardless of what the customer said.
+  Fixed by adding driver fields to the prompt and the response shape;
+  `mergeExtractionResults` had the same gap for multi-window chunks. No
+  regression test yet, since the test suite only runs the mock path.
 - **Download PDF now fills the real GARAGE_001 form**, not a synthesized
   summary. `garage001PdfFieldMap.ts` hand-maps field IDs to the form's raw
   field names, built off `scripts/discoverPdfFields.ts` and spot-checked by
