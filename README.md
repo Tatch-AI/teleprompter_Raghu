@@ -129,5 +129,4 @@ cost you twenty minutes if you hit it blind).
 
 [`futurescope.md`](./futurescope.md) — the driver section only handles one
 driver right now, most of the 27 supplemental forms aren't wired up, the
-`llm` extraction path has never been eval'd against a real call, and a few
-other things.
+`llm` extraction path has no quantitative eval yet, and a few other things.

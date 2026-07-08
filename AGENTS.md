@@ -33,10 +33,11 @@ low-confidence/needs-review confirm → recap. Every recommendation must show *w
 
 ## Known gaps
 
-See `futurescope.md` for the full roadmap (driver/team section, remaining
-supplemental forms, missing base-application fields, pre-call document
-ingestion, Genesys telephony, threshold calibration). Keep it updated as gaps
-close or new ones surface — don't let this drift back into scattered comments.
+See `futurescope.md` for the full roadmap (multi-driver support and driver
+editing, remaining supplemental forms, missing base-application fields,
+pre-call document ingestion, Genesys telephony, threshold calibration). Keep
+it updated as gaps close or new ones surface — don't let this drift back
+into scattered comments.
 
 ## Secrets & data
 

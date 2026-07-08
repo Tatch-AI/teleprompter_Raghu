@@ -151,12 +151,14 @@ Per-field or per-keyterm thresholds are the more likely right shape.
 `npm run analyze-accuracy` exists to supply real data once there's enough.
 There isn't yet.
 
-## The LLM extraction path has no eval against real calls
+## The LLM extraction path has no quantitative eval
 
 The only real-call check so far used the mock extractor and found real
 problems, mostly misattributed agent lines going to the customer, which is
-expected of a keyword heuristic. But `evalAccuracy.ts` has never run
-against the `llm` path or a real call, only the mock extractor against two
-scripts. The fix: build answer keys for a few real `garage_auto/audio/`
-calls the same way, run the harness in `llm` mode, get an actual number.
-Largest untested assumption in the repo until that exists.
+expected of a keyword heuristic. A separate smoke test against the real
+`llm` path (scripted text, not real audio) caught and fixed one real bug —
+see "Recently closed" — but that was a manual spot-check, not a number.
+`evalAccuracy.ts` has never run against the `llm` path or real audio, only
+the mock extractor against two scripts. The fix: build answer keys for a
+few real `garage_auto/audio/` calls, run the harness in `llm` mode, get an
+actual number. Largest untested assumption in the repo until that exists.
