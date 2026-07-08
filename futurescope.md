@@ -1,118 +1,67 @@
 # What's not built yet
 
-Roughly in priority order. `README.md` covers what exists; `AGENTS.md` covers
-the rules for building any of this.
+`README.md` covers what exists; `AGENTS.md` covers the rules for building any of this. This file is the opposite: everything below is either half-done, missing, or hasn't been checked against real data, ordered roughly by how much it would hurt in production.
 
 ## Recently closed
 
-**Vehicle-mix has to add up to 100%, for sales-only dealers.**
-`lib/garageValidationRules.ts` has a small generic mechanism — any group of
-fields that needs to sum to 100% — and one instance of it, the three
-vehicle-mix percentage fields. Shows up live in `ValidationPanel` and in the
-JSON export. Adding another percent-group later is just adding an entry to
-that same file.
+Three things got picked off since the base intake loop went in. Vehicle-mix percentages (private passenger / heavy-commercial / motorcycle) now have to sum to 100 for sales-only dealers — not because that one check matters on its own, but because `lib/garageValidationRules.ts` builds it as a generic "these fields must sum to N" mechanism, so the next percentage-group constraint is a config entry, not new code. It shows up live in `ValidationPanel` and rides along in the JSON export.
 
-**A real eval harness.** `scripts/evalAccuracy.ts` plus hand-written answer
-keys in `scripts/answerKeys/` score the mock extractor against known-correct
-values for both scripted demo calls (`npm run eval-accuracy`) — currently
-20/20 on both. This came out of comparing this repo against another
-candidate's submission for the same take-home
-(`Tatch-AI/david-lingan-superday-intake`), which had something similar. Ours
-is a separate implementation with our own answer keys, not theirs. It only
-covers the mock extractor and the two scripted calls right now — real-call,
-`llm`-mode accuracy is still an open question, and it doesn't check driver
-fields yet either.
+Second, there's an actual eval harness now instead of eyeballing outputs: `scripts/evalAccuracy.ts` scores the mock extractor against hand-written answer keys (`scripts/answerKeys/`) for both scripted calls, currently 20/20 on each (`npm run eval-accuracy`). Worth being honest about where this came from — it surfaced while comparing this repo against another candidate's submission to the same take-home (`Tatch-AI/david-lingan-superday-intake`), which had something similar. This is an independent implementation with its own answer keys, not a copy. It's also narrower than it sounds: mock extractor only, two scripted calls only. Whether the real `llm` path holds up — especially on unscripted audio — is still open; see the last section.
 
-**A minimal driver record.** `lib/garageDriverFields.ts` and
-`mergeDriverCandidates` in `lib/rules.ts`. `IntakeState.drivers` is an array,
-and each driver's name/DOB/license gets the same status/confidence/evidence/
-conflict tracking as any other field — deliberately not a flat object, see
-the README's design-choices section for why. A knockout flag
-(`no_complete_driver`) fires if nobody on file has all three of name, DOB,
-and license number, once business type is known. There's a read-only panel
-for it now (`DriversPanel`).
+Third, a driver record exists now, minimally. `lib/garageDriverFields.ts` plus `mergeDriverCandidates` in `rules.ts`; `IntakeState.drivers` is an array, and deliberately not a flat object — each driver's name/DOB/license carries the same status/confidence/evidence/conflict machinery every other field gets, because a driver's identity is exactly as uncertain and revisable over the course of a call as a business name is (see the design-choices section in the README for the longer argument). A knockout (`no_complete_driver`) fires once business type is known and nobody on file has all three fields. There's a read-only panel for it.
 
-## Driver record — what's still missing
+Fourth, "Download PDF" now fills the actual GARAGE_001 AcroForm instead of drawing a synthesized summary from scratch. `lib/garage001PdfFieldMap.ts` hand-maps field IDs to the real form's field names (`Text387`, `Check Box403`, ...), built off `scripts/discoverPdfFields.ts`'s proximity-guessed inventory and then spot-checked by hand against the actual pages. It runs client-side against bytes served by `app/api/export-pdf`, leaves the form editable rather than flattening it, and correctly produces real conflicts (not silent overwrites) when a transcript correction contradicts an already-filled value — verified end to end on a live call. See the next section for what "verified" doesn't cover yet.
 
-- **Only handles one driver.** Everything merges into `drivers[0]`. Getting a
-  second driver working means figuring out which utterance belongs to which
-  person — probably by matching a name already on file, and starting a new
-  record otherwise.
-- **No editing.** You can see what got extracted but there's no way to
-  confirm or correct a driver field yet — `FieldRow` has that for top-level
-  fields, the nested driver shape doesn't have an equivalent.
-- **Eval harness doesn't check drivers.** It only reads `state.fields`.
-- Two rules from the training material aren't built: no personal auto policy
-  should auto-set coverage to "business and personal use," and an
-  out-of-state license should raise a flag recommending the driver switch to
-  in-state.
+## The PDF export has no eval — the JSON export and Ask-Next inherit one, this doesn't
 
-## Coverage-line recommendation has no UI
+`scripts/evalAccuracy.ts` scores `state.fields` directly against hand-written answer keys, and both `buildSubmissionRecord` (the JSON export) and `selectNextBestQuestion` (what drives Ask-Next) read from that exact same state — so whatever accuracy guarantee extraction has, they get it for free. `fillRealApplicationPdf` doesn't inherit anything. It's a second translation layer on top of already-correct field values, and it can be wrong in ways the field-level eval literally cannot see:
 
-`lib/garageCoverageRules.ts` already figures out which of the three coverage
-lines apply (garage liability / garage keepers / dealers physical damage) and
-it's in the JSON export, but nothing on screen shows it. Needs a panel next
-to the risk flags and supplements ones.
+- **Wrong-box mappings.** 22 of the roughly 30 fields a dealer-type call touches are hand-mapped to specific boxes on a 998-field, 12-page form. If one of those 22 entries names the wrong physical box — a plausible mistake to make once, let alone across 22, on a form this size — `form.getTextField(mapping.pdfField).setText(...)` still succeeds. Nothing throws, nothing fails a test; the PDF just has a correct value sitting in the wrong place. The only verification so far is eyeballing a handful of filled fields after one demo run, not a systematic check of all 22.
+- **No value formatting.** Text fields go in as `setText(String(value))` — raw JS stringification, not `formatFieldValue()`, which is what the UI and the JSON export use for currency/date/enum display. `sales_revenue: 2400000` lands on the real form as `2400000`, not `$2,400,000`. That's a different failure mode from a wrong box: the value can be in the exactly correct field and still be wrong to look at.
+- **Real coverage is ~73%, not ~100%.** 8 fields (`business_type`, `business_story`, `why_shopping`, `sales_model`, `dealer_plate_count`, `test_drives_allowed`, `lot_security`, `keys_handling`) are explicitly left unmapped because their shape doesn't match anything on the real form — `sales_model` is one enum against the form's 3-way percentage split, `dealer_plate_count` is one total against four per-vehicle-type boxes. These are documented, not bugs, but they mean even perfect extraction leaves a meaningful fraction of the real form blank.
 
-## Most supplemental forms aren't wired up
+The fix is a read-back eval, and it's mostly wiring rather than new work: after filling, reopen the generated PDF with pdf-lib and assert `form.getTextField(x).getText()` / `form.getCheckBox(x).isChecked()` matches the expected value for all 22 mapped fields, reusing the exact answer keys `evalAccuracy.ts` already has for both scripted calls. That turns "the PDF didn't crash" into an actual "PDF fill accuracy: 22/22" number — checkboxes need exact boolean match including whatever the `invert` flag does, text fields need exact string match, and that second part doesn't mean anything until the formatting gap above is fixed first.
 
-4 of the 27 `GARAGE_SUP_*` forms trigger automatically right now — heavy
-vehicle, towing, wholesale dealer, lessors risk. The rest (auto auction,
-valet, salvage yard, young driver, hired & non-owned auto, and so on) need
-fields added to the base catalog first, since there's nothing in the
-conversation yet that would signal them. Same process as always: read the
-real PDF, pick out what actually matters, add a trigger.
+## Where the driver record is still thin
 
-## Fields the base application is missing
+It only handles one driver — everything lands in `drivers[0]` regardless of how many people the call actually mentions. Making a second driver work means solving a real problem, not allocating another array slot: deciding which utterance belongs to which person, probably by matching against a name already on file and starting a fresh record when nothing matches. There's also no way to correct a driver field once it's wrong — `FieldRow` has confirm/edit for top-level fields, and the nested driver shape has no equivalent, so the correction-loop story this system tells for everything else doesn't actually hold here yet. The eval harness doesn't check drivers either, since it only reads `state.fields`. And two rules from the training material never got built: a personal-auto-only driver should force coverage to "business and personal use," and an out-of-state license should raise a flag recommending the driver switch to in-state — neither is hard, both just didn't make the cut.
 
-All came out of the training material:
+If this needs to hold up in a live demo rather than just pass tests, the fix order isn't "add a second driver first." Editability comes first: `DriversPanel` is currently the one surface in the app where the "nothing is trusted until confirmed, everything can be corrected live" story doesn't actually hold, and that's a credibility problem more than a feature gap — every other panel can be fixed on the spot, and a rep hitting a dead end trying to correct a wrong driver DOB mid-demo undercuts the exact thing the rest of the system is built to prove. Multi-driver support comes second, for a specific reason rather than "more is better": the real Harper training walkthrough this feature is modeled on has two drivers in it, an owner and an employee, so a demo scenario built to match that material honestly needs two. The two unbuilt training rules stay lowest priority — refinements to a flow that already works, not gaps in the flow itself.
 
-- Policy effective date — no field for it.
-- Business address and phone — the `location` section exists in the type
-  system, nothing uses it.
-- Deductible.
-- The vehicle-mix percentages should also cross-check against the
-  service/repair revenue split, not just sum to 100 on their own — needs
-  `dealer_plus_repair` support, which isn't scoped yet.
-- Floor-plan financing. If the inventory's bank-financed, the lender has to
-  be listed as loss payee — training calls this non-negotiable, and there's
-  no field for it at all.
-- Loss detail. Right now `prior_losses` is just a yes/no. Real underwriting
-  wants the date, the amount, a description, and the prior carrier's
-  premium.
-- Optional coverages — wind/hail/flood, theft & vandalism, false pretense —
-  none of these exist yet.
+## Most of the supplemental-form catalog is still unwired
 
-## No way to start a call from an existing document
+Four of the twenty-seven `GARAGE_SUP_*` forms trigger automatically — heavy vehicle, towing, wholesale dealer, lessors risk. The other twenty-three don't, and not because the trigger logic is hard — it's that nothing in the base conversation currently produces a signal for them. Auto auction, valet, salvage yard, young driver, hired-and-non-owned-auto: none of these have a corresponding question in the talk track, so there's nothing for a trigger to key off. Closing each one follows the same process every time — read the actual PDF, work out which of its questions matter, add fields for those, then wire the trigger. It's a curation bottleneck, not an engineering one.
 
-Real Harper calls sometimes show up with a lead sheet already filled out —
-one of the real call transcripts has a partner rep reading off the
-customer's name, state, and coverage type before handing the call over.
-Right now the engine only ever builds the record from the live conversation.
-A document could feed the same extraction pipeline as one big chunk up
-front, with everything landing as `needs_review` instead of `filled` — still
-has to get confirmed live, just starts from something instead of nothing.
+## Fields the base application doesn't ask about at all
+
+All surfaced by the training material, none currently in the catalog:
+
+- Policy effective date
+- Business address and phone — the `location` section already exists in the type system and is unused
+- Deductible
+- Floor-plan financing: if the inventory is bank-financed, the lender has to be listed as loss payee. Training material calls this non-negotiable, and there's no field for it whatsoever
+- Loss detail beyond yes/no — date, amount, description, prior carrier's premium
+- Optional coverages — wind/hail/flood, theft and vandalism, false pretense
+- A tighter version of the vehicle-mix check that cross-validates against the service/repair revenue split rather than just summing to 100 in isolation, blocked on `dealer_plus_repair` support that isn't scoped yet
+
+## Chunking and interruptions haven't been stress-tested
+
+Everything about when extraction fires has only ever been exercised by clean, scripted, one-speaker-at-a-time demo calls — never by anything resembling real cross-talk.
+
+Extraction only fires once Deepgram reports a complete utterance: a speaker change, or `utterance_end_ms` (currently 1000ms) of silence. Interim/partial transcripts are discarded outright (`lib/deepgramSource.ts`) — deliberately, since extracting from a half-formed sentence risks committing to a wrong fact before the customer finishes correcting themselves. Reasonable tradeoff for a clean call, but never tried against a real interruption pattern: two people talking over each other, a customer cut off mid-sentence, or a rapid back-and-forth where speaker-change-triggered flushing could produce a string of tiny, fragmented chunks instead of clean utterance boundaries. Nobody knows yet whether that degrades gracefully or produces noise.
+
+The long-text chunking path (`splitWithOverlap`/`mergeExtractionResults` in `lib/llmExtraction.ts`) — overlapping windows with confidence-based dedup, built for a rep pasting a large block of text or a future document-ingestion flow — has never been exercised by an actual live call either, since real utterances flush naturally short. Tested in isolation, not against anything real.
+
+And corrections aren't safe against either of these: `handleCorrectChunk` shares the same `requestSeq` staleness guard as live chunks but isn't routed through the same serial `liveQueue`, so correcting a line while audio is still actively streaming can lose a race to an incoming live chunk and get silently dropped — no error, just quietly discarded. Fine if corrections only happen between chunks or after a call ends; a real risk if a rep tries to fix something mid-stream.
 
 ## Real telephony
 
-`TranscriptSource` is the seam for this — `ManualTranscriptSource` and
-`DeepgramLiveSource` both implement it today as local stand-ins. A version
-that reads a real call's dual-channel Genesys feed would slot in the same
-way, and it'd also fix the speaker-attribution problem for good, since each
-party would just arrive on its own channel instead of getting guessed at
-from one mixed stream.
+`TranscriptSource` is the seam for this — `ManualTranscriptSource` and `DeepgramLiveSource` both implement it today as local stand-ins. A version that reads a real call's dual-channel Genesys feed would slot in the same way, and it'd also fix the speaker-attribution problem for good, since each party would just arrive on its own channel instead of getting guessed at from one mixed stream. Practically, this means standing up a small Node.js bridge that speaks WebSocket to Genesys on one side and `TranscriptSource` on the other — not a rewrite of anything upstream of it.
 
-## The confidence thresholds are guesses
+## The confidence thresholds are guesses, and probably the wrong shape
 
-`AUTO_FILL_THRESHOLD` (0.8) and `NEEDS_REVIEW_THRESHOLD` (0.55) were picked,
-not measured. `npm run analyze-accuracy` exists to check them once there's
-enough real feedback data — right now there isn't.
+`AUTO_FILL_THRESHOLD` (0.8) and `NEEDS_REVIEW_THRESHOLD` (0.55) are two flat numbers applied to every field alike — that's likely wrong before it's even a question of the right values. A proper noun (a business or driver name) and a plain yes/no answer don't carry the same mishearing risk from ASR, and `lib/garageKeyterms.ts` already tracks which terms are rare or compound enough to need keyword-boosting — roughly the same signal that should inform how much a low-confidence extraction on that field deserves to be trusted. The more useful version is probably per-field or per-keyterm-category thresholds, modular enough to tune independently, rather than one blanket pair of constants. `npm run analyze-accuracy` exists to supply the data to set them once there's enough real feedback to look at — there isn't yet, so even the flat version is a guess, not a measurement.
 
-## The LLM extraction path hasn't been tested against real calls
+## The LLM extraction path has no eval against real calls
 
-The one real-call accuracy check that's happened so far used the mock
-extractor against unscripted Harper audio, and it showed real problems —
-misattributing the agent's own lines to the customer, mostly. That's about
-what you'd expect from a demo heuristic. But it means nobody's actually
-checked how the real `llm` extraction path does against messy real audio at
-any volume, which is worth doing before trusting it.
+The one real-call accuracy check that's happened used the mock extractor against unscripted Harper audio, and it exposed real problems — misattributing the agent's own lines to the customer, mostly. Expected from a keyword heuristic, not a surprise. But `scripts/evalAccuracy.ts` has never actually been pointed at either the `llm` extraction path or a real (non-scripted) call — it only scores the mock extractor against the two demo scripts. Closing this is a specific, scoped extension, not a vague "test it more": build answer keys for a handful of real `garage_auto/audio/` calls the same way the two demo-call answer keys were built, run `evalAccuracy.ts` against the `llm` path instead of mock, and get an actual number. Until that number exists, whether the production extraction path holds up on messy real audio is the largest untested assumption in the repo.

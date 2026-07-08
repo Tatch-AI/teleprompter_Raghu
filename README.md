@@ -5,9 +5,9 @@ intake call. While the customer's talking, it fills out the application,
 catches problems, and tells the agent what to ask next before they'd have to
 think of it themselves.
 
-The transcript is just the input. The actual product is a plain deterministic
-rules engine sitting behind it — the LLM's only job is to read the transcript
-and hand back candidate facts with evidence. It doesn't decide anything.
+The transcript is just the input. The actual product is a deterministic rules
+engine sitting behind it — the LLM's role is a single inference pass per
+chunk, returning candidate facts with evidence. It performs no decisioning.
 
 ## How a call moves through it
 
@@ -40,22 +40,30 @@ either.
 
 ## Design choices
 
-**The LLM doesn't decide anything, it just reads.** Status, conflicts, risk
-flags, what to ask next — all of it is deterministic TypeScript in
-`lib/rules.ts`. If a decision needs a prompt to change, that's a bug.
+**Extraction is a single inference pass, not a decision point.** Each
+transcript chunk is passed through one LLM call (or the deterministic mock,
+when no key is configured), returning a fixed-schema list of candidate facts
+— `{fieldId, value, confidence, evidenceQuote}` — with no side effects and no
+access to business logic. Field status, conflict detection, risk evaluation,
+and next-question selection are pure functions in `lib/rules.ts`, applied
+deterministically after the inference pass returns. The LLM has no mechanism
+to mutate application state directly.
 
-**The field catalog isn't the real form.** GARAGE_001 the PDF has 998 form
-fields, and most of them are boilerplate or repeating rows with names like
-`Text47`. We picked the ~30 that actually drive a conversation and left the
-rest alone. New supplements get the same treatment — read the PDF, pick what
-matters, don't try to mirror it field-for-field.
+**The field catalog is a curated subset, not a schema mirror.** GARAGE_001 is
+a 998-field AcroForm PDF; most fields are non-semantic (repeating schedule
+rows, boilerplate, auto-generated IDs like `Text47`) and carry no extractable
+meaning. `lib/garageFieldDefinitions.ts` models ~30 fields selected for
+conversational relevance and underwriting materiality. Supplemental forms are
+curated the same way — no field-for-field mapping is attempted.
 
-**Nobody picks which forms apply up front.** Supplemental questionnaires and
-coverage lines (garage liability / garage keepers / dealers physical damage)
-get triggered by what comes up in the call — business type, a specific
-answer — not chosen at the start of the intake.
+**Form and coverage applicability is computed reactively, not classified
+upfront.** Which supplemental questionnaires and coverage lines (garage
+liability / garage keepers / dealers physical damage) apply is derived from
+accumulated state — business type, specific field values — via declarative
+rule sets (`garageSupplementRules.ts`, `garageCoverageRules.ts`) evaluated on
+every recompute, rather than resolved by an initial classification step.
 
-**Every fact carries the same shape, wherever it lives:**
+**One field-state shape, applied uniformly regardless of nesting depth.**
 
 ```
 { value, status, confidence, evidence, conflict? }
@@ -65,30 +73,33 @@ state.fields.sales_revenue          → this shape
 state.drivers[0].fields.driver_dob  → this shape
 ```
 
-That's true for a top-level field and it's true for a driver's date of birth.
-It would've been simpler to store a driver as one flat object, but then a
-misheard DOB couldn't raise a conflict the same way everything else does —
-and that closed-loop behavior is most of what makes this useful. So the
-driver schedule reuses the same per-field tracking instead of inventing a
-second, weaker data model next to it.
+Every extractable datum — a top-level field or a field nested inside a driver
+record — uses this same structure. This is what makes conflict detection,
+confidence gating, and evidence attribution apply identically to a driver's
+date of birth and to `legal_name`. Modeling driver records as flat objects
+was rejected: it would exclude nested fields from conflict resolution and
+confidence thresholds entirely.
 
-**A wrong-looking answer isn't always a conflict.** A risk flag means one
-field's value is a problem by itself. A conflict means two things said about
-the same fact disagree. Neither of those covers "each of these three
-percentages is individually fine, but they add up to 85 instead of 100" — so
-that's a third kind of check, validation issues, done as a generic
-"these fields have to add up to X" rule rather than a one-off for vehicle
-mix specifically.
+**Validation issues are a distinct constraint class, not a variant of risk
+flags or conflicts.** A risk flag is a single-field predicate over a filled
+value. A conflict is a pairwise contradiction between sequential extractions
+for the same field. Neither expresses an invariant across multiple
+independently-valid fields — e.g., three percentages that each parse
+correctly but sum to 85, not 100. This is implemented as a generic constraint
+class (`GARAGE_PERCENT_GROUPS` in `lib/garageValidationRules.ts`), not a
+one-off check for vehicle mix.
 
-**Input sources are swappable.** `TranscriptSource` is one interface; manual
-text, mic, and file replay all implement it today. A real telephony
-integration is the same shape of work, not a rewrite.
+**Input modality is abstracted behind one interface.** Manual text entry,
+live microphone capture, and file replay all implement `TranscriptSource`. A
+production telephony integration is an additional implementation of the same
+interface, not a structural change to the extraction or rules pipeline.
 
-**There's a feedback loop, because the thresholds are guesses right now.**
-Every Confirm, Edit, and conflict resolution gets logged, same for every raw
-extraction candidate. `AUTO_FILL_THRESHOLD` and `NEEDS_REVIEW_THRESHOLD` in
-`lib/rules.ts` were picked, not fit — the logging exists so they can
-eventually be checked against real outcomes instead.
+**Confidence thresholds are fixed constants pending calibration.**
+`AUTO_FILL_THRESHOLD` (0.8) and `NEEDS_REVIEW_THRESHOLD` (0.55) in
+`lib/rules.ts` were set, not fit to data. Every field-level correction
+(Confirm / Edit / conflict resolution) and every raw extraction candidate is
+persisted to an append-only log specifically to support future recalibration
+against outcome data.
 
 ## Worth knowing before you trust it
 
@@ -117,4 +128,5 @@ cost you twenty minutes if you hit it blind).
 
 [`futurescope.md`](./futurescope.md) — the driver section only handles one
 driver right now, most of the 27 supplemental forms aren't wired up, the
-coverage-line recommendation has no UI yet, and a few other things.
+`llm` extraction path has never been eval'd against a real call, and a few
+other things.
