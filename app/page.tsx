@@ -21,7 +21,7 @@ import {
   resolveConflict as resolveConflictRule,
 } from "@/lib/rules";
 import { buildFeedbackEvent, persistFeedback } from "@/lib/feedback";
-import { buildApplicationPdf, buildSubmissionRecord, downloadJson, downloadPdf } from "@/lib/exportPdf";
+import { fillRealApplicationPdf, buildSubmissionRecord, downloadJson, downloadPdf } from "@/lib/exportPdf";
 import { DeepgramLiveSource, DeepgramStatus, LiveInput } from "@/lib/deepgramSource";
 import {
   CorrectionAction,
@@ -142,6 +142,40 @@ export default function HomePage() {
     setMockIndex((i) => i + 1);
     void processChunk(chunk.text, chunk.speaker);
   }, [mockIndex, activeChunks, processChunk]);
+
+  // Fixes what ASR actually heard (mainly proper nouns — business/owner names) rather
+  // than an extracted field's value. Re-runs extraction on the corrected text server-side
+  // so any fields the bad transcription broke get fixed too, guarded by the same
+  // requestSeq pattern as every other state-mutating request.
+  const handleCorrectChunk = useCallback(
+    async (chunkId: string, correctedText: string) => {
+      setIsProcessing(true);
+      setBanner(null);
+      const seq = ++requestSeq.current;
+      try {
+        const response = await fetch("/api/correct-chunk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chunkId, correctedText, currentState: intakeState }),
+        });
+        const data = (await response.json()) as ProcessChunkResponse & { error?: string };
+        if (seq !== requestSeq.current) return;
+        if (!response.ok) {
+          setBanner(data.error ?? "Could not correct that chunk.");
+          return;
+        }
+        setIntakeState(data.updatedState);
+        setNextQuestion(data.nextBestQuestion);
+        setReasons(data.reasons);
+        setExtractorMode(data.extractorMode);
+      } catch {
+        if (seq === requestSeq.current) setBanner("Network error — the correction was not applied.");
+      } finally {
+        if (seq === requestSeq.current) setIsProcessing(false);
+      }
+    },
+    [intakeState],
+  );
 
   const handleReset = useCallback(() => {
     // Bump the shared sequence guard first so any in-flight response — manual
@@ -324,7 +358,7 @@ export default function HomePage() {
   const handleDownloadPdf = useCallback(async () => {
     setIsExporting(true);
     try {
-      const bytes = await buildApplicationPdf(applicableDefs, intakeState.fields, businessType);
+      const bytes = await fillRealApplicationPdf(applicableDefs, intakeState.fields, businessType);
       downloadPdf(bytes, `garage-application-${intakeState.intakeId ?? "draft"}.pdf`);
     } catch {
       setBanner("Could not generate the application PDF.");
@@ -464,6 +498,7 @@ export default function HomePage() {
             onDraftChange={setDraft}
             onProcess={handleProcess}
             onSimulate={handleSimulate}
+            onCorrectChunk={handleCorrectChunk}
             isProcessing={isProcessing}
             hasMoreMock={hasMoreMock}
             nextSpeaker={nextSpeaker}

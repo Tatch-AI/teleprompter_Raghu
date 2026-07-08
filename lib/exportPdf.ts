@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import {
   FieldDefinition,
   FieldSection,
@@ -6,7 +6,11 @@ import {
   GarageBusinessType,
   IntakeState,
 } from "./types";
-import { formatBusinessType, formatFieldValue, SECTION_LABEL, STATUS_LABEL } from "./formatters";
+import {
+  ENTITY_TYPE_OTHER_TEXT_FIELD,
+  ENTITY_TYPE_PDF_CHECKBOXES,
+  GARAGE_001_PDF_FIELD_MAP,
+} from "./garage001PdfFieldMap";
 
 // Schema version for the structured export below — bump this whenever the
 // shape changes, so downstream consumers (AMS/carrier API/warehouse) can
@@ -50,6 +54,13 @@ export interface SubmissionRecord {
     line: string;
     reason: string;
   }[];
+  validationIssues: {
+    severity: string;
+    label: string;
+    message: string;
+    fieldIds: string[];
+  }[];
+  drivers: Record<string, { value: unknown; status: FieldState["status"]; confidence: number }>[];
 }
 
 // The structured artifact of record — this, not the rendered PDF, is what a
@@ -101,6 +112,20 @@ export function buildSubmissionRecord(
       line: c.line,
       reason: c.reason,
     })),
+    validationIssues: state.validationIssues.map((v) => ({
+      severity: v.severity,
+      label: v.label,
+      message: v.message,
+      fieldIds: v.fieldIds,
+    })),
+    drivers: state.drivers.map((d) =>
+      Object.fromEntries(
+        Object.entries(d.fields).map(([fieldId, fs]) => [
+          fieldId,
+          { value: fs.status !== "missing" ? fs.normalizedValue ?? fs.value : null, status: fs.status, confidence: fs.confidence },
+        ]),
+      ),
+    ),
   };
 }
 
@@ -116,136 +141,98 @@ export function downloadJson(record: SubmissionRecord, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-const SECTION_ORDER: FieldSection[] = [
-  "business_identity",
-  "operations",
-  "coverage_intent",
-  "vehicles_driving",
-  "premises",
-  "history",
-  "online_verification",
-  "underwriting_risk",
-  "drivers_team",
-  "location",
-];
+// Fetches the raw GARAGE_001 source PDF bytes from a small server route
+// (app/api/export-pdf) rather than reading garage_auto/ from disk directly — this file
+// runs in the browser, and the source form lives outside public/, so a server route is
+// the simplest way to hand its bytes to client-side pdf-lib without duplicating the
+// 1.3MB binary into the app's static assets.
+async function fetchSourceApplicationPdfBytes(): Promise<Uint8Array> {
+  const res = await fetch("/api/export-pdf");
+  if (!res.ok) {
+    throw new Error(`Failed to load source application PDF (HTTP ${res.status})`);
+  }
+  const buf = await res.arrayBuffer();
+  return new Uint8Array(buf);
+}
 
-const PAGE_W = 612; // US Letter
-const PAGE_H = 792;
-const MARGIN = 54;
-const LINE = 16;
+// Effective value for a field: prefer the deterministically normalized value (e.g. an
+// actual boolean for boolean fields) and fall back to the raw extracted value.
+function effectiveFieldValue(fs: FieldState | undefined): unknown {
+  if (!fs) return null;
+  return fs.normalizedValue ?? fs.value ?? null;
+}
 
-// Generates a clean, filled GARAGE_001 application PDF from the intake state.
-// Runs in the browser (pdf-lib is isomorphic) so the rep can download on the spot.
-export async function buildApplicationPdf(
+// Fills the REAL GARAGE_001 AcroForm PDF (garage_auto/forms/GARAGE_001_Garage_Liability_
+// Application.pdf, 998 generically-named fields) using the field-id -> pdfField map in
+// lib/garage001PdfFieldMap.ts. The form is left editable (not flattened) so the rep can
+// still adjust values in a PDF viewer before submitting.
+//
+// `applicableDefs` and `businessType` aren't needed to decide which pdfFields to touch
+// (the map is keyed directly by field id and values come from `fields`), but the
+// parameter is kept in case a future caller wants to restrict filling to only the fields
+// relevant to the selected business type.
+export async function fillRealApplicationPdf(
   applicableDefs: FieldDefinition[],
   fields: Record<string, FieldState>,
   businessType: GarageBusinessType | null,
 ): Promise<Uint8Array> {
-  const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  void applicableDefs;
+  void businessType;
 
-  let page = doc.addPage([PAGE_W, PAGE_H]);
-  let y = PAGE_H - MARGIN;
+  const sourceBytes = await fetchSourceApplicationPdfBytes();
+  const doc = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
+  const form = doc.getForm();
 
-  const newPageIfNeeded = (needed: number) => {
-    if (y - needed < MARGIN) {
-      page = doc.addPage([PAGE_W, PAGE_H]);
-      y = PAGE_H - MARGIN;
-    }
-  };
+  for (const [fieldId, mapping] of Object.entries(GARAGE_001_PDF_FIELD_MAP)) {
+    if (!mapping || fieldId === "entity_type") continue; // entity_type is special-cased below
+    const fs = fields[fieldId];
+    if (!fs || fs.status === "missing") continue;
 
-  const text = (
-    p: PDFPage,
-    s: string,
-    x: number,
-    yy: number,
-    f: PDFFont,
-    size: number,
-    color = rgb(0.1, 0.12, 0.18),
-  ) => p.drawText(s, { x, y: yy, size, font: f, color });
+    const value = effectiveFieldValue(fs);
+    if (value === null || value === undefined || value === "") continue;
 
-  // Header
-  text(page, "GARAGE_001 — Commercial Garage Application", MARGIN, y, bold, 16);
-  y -= LINE + 4;
-  text(page, `Business type: ${formatBusinessType(businessType)}`, MARGIN, y, font, 11, rgb(0.3, 0.34, 0.42));
-  y -= LINE;
-  text(page, `Generated: ${new Date().toLocaleString()}`, MARGIN, y, font, 10, rgb(0.45, 0.48, 0.55));
-  y -= LINE + 6;
-  page.drawLine({
-    start: { x: MARGIN, y },
-    end: { x: PAGE_W - MARGIN, y },
-    thickness: 1,
-    color: rgb(0.8, 0.82, 0.88),
-  });
-  y -= LINE;
-
-  const grouped = SECTION_ORDER.map((section) => ({
-    section,
-    defs: applicableDefs
-      .filter((d) => d.section === section)
-      .sort((a, b) => a.priority - b.priority),
-  })).filter((g) => g.defs.length > 0);
-
-  for (const group of grouped) {
-    newPageIfNeeded(LINE * 3);
-    text(page, SECTION_LABEL[group.section] ?? group.section, MARGIN, y, bold, 12, rgb(0.13, 0.2, 0.4));
-    y -= LINE + 2;
-
-    for (const def of group.defs) {
-      newPageIfNeeded(LINE);
-      const fs = fields[def.id];
-      const value = fs && fs.status !== "missing" ? formatFieldValue(fs.value, def.type) : "—";
-      const status = fs ? STATUS_LABEL[fs.status] : "Missing";
-      const confirmedMark = fs?.confirmed ? " (rep-confirmed)" : "";
-
-      const label = `${def.label}${def.required ? " *" : ""}:`;
-      text(page, label, MARGIN + 8, y, bold, 10, rgb(0.25, 0.28, 0.35));
-      // Value wraps if long.
-      const maxChars = 62;
-      const valStr = String(value);
-      const lines = valStr.length > maxChars ? chunkString(valStr, maxChars) : [valStr];
-      text(page, lines[0], MARGIN + 200, y, font, 10);
-      text(page, `[${status}${confirmedMark}]`, PAGE_W - MARGIN - 150, y, font, 8, rgb(0.5, 0.53, 0.6));
-      y -= LINE;
-      for (let i = 1; i < lines.length; i++) {
-        newPageIfNeeded(LINE);
-        text(page, lines[i], MARGIN + 200, y, font, 10);
-        y -= LINE;
+    try {
+      if (mapping.kind === "text") {
+        form.getTextField(mapping.pdfField).setText(String(value));
+      } else {
+        const checked = mapping.invert ? !Boolean(value) : Boolean(value);
+        const checkbox = form.getCheckBox(mapping.pdfField);
+        if (checked) checkbox.check();
+        else checkbox.uncheck();
       }
+    } catch {
+      // Field renamed/missing in this PDF revision, or the wrong widget type for its
+      // mapping (e.g. pdf-lib disagreeing on checkbox vs text) — skip rather than fail
+      // the whole export over one field.
+      continue;
     }
-    y -= 6;
   }
 
-  newPageIfNeeded(LINE * 2);
-  y -= 4;
-  text(
-    page,
-    "* required field. Values marked (rep-confirmed) were verified by the agent.",
-    MARGIN,
-    y,
-    font,
-    8,
-    rgb(0.5, 0.53, 0.6),
-  );
+  // entity_type is a real multi-option checkbox group (one checkbox per option, plus a
+  // free-text "Other"), not a single {pdfField, kind} pair, so it can't go through the
+  // generic loop above.
+  const entityFs = fields.entity_type;
+  if (entityFs && entityFs.status !== "missing") {
+    const value = String(effectiveFieldValue(entityFs) ?? "").trim();
+    const checkboxField = value ? ENTITY_TYPE_PDF_CHECKBOXES[value] : undefined;
+    try {
+      if (checkboxField) {
+        form.getCheckBox(checkboxField).check();
+      } else if (value) {
+        form.getTextField(ENTITY_TYPE_OTHER_TEXT_FIELD).setText(value);
+      }
+    } catch {
+      // Skip — see comment in the main loop above.
+    }
+  }
+
+  try {
+    form.updateFieldAppearances();
+  } catch {
+    // Non-fatal: worst case a PDF viewer regenerates appearances itself on open.
+  }
 
   return doc.save();
-}
-
-function chunkString(s: string, size: number): string[] {
-  const words = s.split(" ");
-  const out: string[] = [];
-  let line = "";
-  for (const w of words) {
-    if ((line + " " + w).trim().length > size) {
-      if (line) out.push(line.trim());
-      line = w;
-    } else {
-      line = `${line} ${w}`;
-    }
-  }
-  if (line.trim()) out.push(line.trim());
-  return out.length ? out : [s];
 }
 
 export function downloadPdf(bytes: Uint8Array, filename: string): void {

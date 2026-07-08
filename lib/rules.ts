@@ -796,6 +796,55 @@ export function processExtraction(
   return recompute(next);
 }
 
+// Replaces an existing chunk's text in place (rather than appending a new chunk) —
+// used when a rep fixes what ASR actually heard. Keeps the first-ever original text,
+// so re-correcting a chunk twice doesn't lose what ASR originally produced.
+export function replaceTranscriptChunkText(
+  state: IntakeState,
+  chunkId: string,
+  correctedText: string,
+): { state: IntakeState; chunk: TranscriptChunk } | null {
+  const idx = state.transcriptChunks.findIndex((c) => c.id === chunkId);
+  if (idx === -1) return null;
+
+  const original = state.transcriptChunks[idx];
+  const updatedChunk: TranscriptChunk = {
+    ...original,
+    text: correctedText.trim(),
+    originalText: original.originalText ?? original.text,
+  };
+  const transcriptChunks = [...state.transcriptChunks];
+  transcriptChunks[idx] = updatedChunk;
+  return { state: { ...state, transcriptChunks }, chunk: updatedChunk };
+}
+
+// Same merge pipeline as processExtraction, but against a corrected existing chunk
+// instead of a newly-appended one — the corrected text becomes the authoritative
+// version of what was said, so any fields the bad transcription broke get fixed here
+// too, not just logged as a training signal.
+export function processTranscriptCorrection(
+  state: IntakeState,
+  chunkId: string,
+  correctedText: string,
+  extraction: ExtractionResult,
+): { state: IntakeState; nextBestQuestion: NextBestQuestion; reasons: string[] } | null {
+  const replaced = replaceTranscriptChunkText(state, chunkId, correctedText);
+  if (!replaced) return null;
+
+  let next = mergeExtractedFields(replaced.state, extraction.extractedFields, replaced.chunk);
+  next = mergeDriverCandidates(next, extraction.driverFields ?? [], replaced.chunk);
+
+  const explicitBt = extraction.extractedFields.find((c) => c.fieldId === "business_type");
+  const potential =
+    extraction.potentialBusinessType ??
+    (explicitBt ? (normalizeCandidate(FIELD_BY_ID["business_type"], explicitBt.value) as GarageBusinessType) : null);
+  const btConf = extraction.businessTypeConfidence ?? explicitBt?.confidence;
+  next = applyBusinessType(next, potential, btConf);
+
+  next = { ...next, generation: next.generation + 1 };
+  return recompute(next);
+}
+
 // ---------------------------------------------------------------------------
 // Rep actions (deterministic, no LLM) — these close the conflict/review loops
 // ---------------------------------------------------------------------------

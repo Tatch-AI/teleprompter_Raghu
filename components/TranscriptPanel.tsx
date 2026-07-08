@@ -1,7 +1,94 @@
 "use client";
 
+import { useState } from "react";
 import { TranscriptChunk } from "@/lib/types";
 import { DemoTranscript } from "@/lib/mockTranscript";
+
+function TranscriptChunkRow({
+  chunk,
+  onCorrect,
+}: {
+  chunk: TranscriptChunk;
+  onCorrect: (chunkId: string, correctedText: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(chunk.text);
+
+  const startEdit = () => {
+    setDraft(chunk.text);
+    setEditing(true);
+  };
+  const save = () => {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== chunk.text) onCorrect(chunk.id, trimmed);
+    setEditing(false);
+  };
+
+  return (
+    <div
+      className={`rounded-xl px-3 py-2 text-sm ${
+        chunk.speaker === "agent" ? "ml-6 bg-indigo-500/10 text-indigo-100" : "mr-6 bg-slate-800/70 text-slate-100"
+      }`}
+    >
+      <div className="mb-0.5 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          {chunk.speaker ?? "customer"}
+        </span>
+        <span className="flex items-center gap-2">
+          {chunk.originalText && (
+            <span className="text-[10px] font-medium uppercase text-amber-400/80">corrected</span>
+          )}
+          {!editing && (
+            <button
+              onClick={startEdit}
+              className="text-[11px] font-medium text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
+              title="Fix what ASR actually heard (e.g. a mis-transcribed name) — re-runs extraction on the corrected text"
+            >
+              Edit
+            </button>
+          )}
+        </span>
+      </div>
+
+      {editing ? (
+        <div className="space-y-1.5">
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={2}
+            className="scroll-thin w-full resize-none rounded-lg border border-slate-600/60 bg-slate-950/60 px-2 py-1 text-sm text-slate-100 outline-none focus:border-indigo-500/60"
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") save();
+              if (e.key === "Escape") setEditing(false);
+            }}
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={save}
+              className="rounded-lg border border-indigo-500/50 bg-indigo-500/20 px-2.5 py-1 text-xs text-indigo-100 hover:bg-indigo-500/30"
+            >
+              Save correction
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="rounded-lg border border-slate-600/60 bg-slate-800/70 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700/70"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {chunk.text}
+          {chunk.originalText && (
+            <p className="mt-1 text-xs italic text-slate-500 line-through">{chunk.originalText}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function TranscriptPanel({
   chunks,
@@ -9,6 +96,7 @@ export default function TranscriptPanel({
   onDraftChange,
   onProcess,
   onSimulate,
+  onCorrectChunk,
   isProcessing,
   hasMoreMock,
   nextSpeaker,
@@ -23,6 +111,7 @@ export default function TranscriptPanel({
   onDraftChange: (value: string) => void;
   onProcess: () => void;
   onSimulate: () => void;
+  onCorrectChunk: (chunkId: string, correctedText: string) => void;
   isProcessing: boolean;
   hasMoreMock: boolean;
   nextSpeaker: "agent" | "customer";
@@ -47,19 +136,7 @@ export default function TranscriptPanel({
           </p>
         )}
         {chunks.map((chunk) => (
-          <div
-            key={chunk.id}
-            className={`rounded-xl px-3 py-2 text-sm ${
-              chunk.speaker === "agent"
-                ? "ml-6 bg-indigo-500/10 text-indigo-100"
-                : "mr-6 bg-slate-800/70 text-slate-100"
-            }`}
-          >
-            <div className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              {chunk.speaker ?? "customer"}
-            </div>
-            {chunk.text}
-          </div>
+          <TranscriptChunkRow key={chunk.id} chunk={chunk} onCorrect={onCorrectChunk} />
         ))}
       </div>
 

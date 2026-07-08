@@ -9,11 +9,13 @@
     "lint": "next lint",
     "test": "node --import tsx/esm scripts/tests/engine.test.ts && node --import tsx/esm scripts/tests/coverageLines.test.ts && node --import tsx/esm scripts/tests/validation.test.ts && node --import tsx/esm scripts/tests/drivers.test.ts && node --import tsx/esm scripts/tests/harperRules.test.ts",
     "synthesize-demo-audio": "node --import tsx/esm scripts/synthesizeDemoCalls.ts",
-    "analyze-accuracy": "node --import tsx/esm scripts/analyzeAccuracy.ts"
+    "analyze-accuracy": "node --import tsx/esm scripts/analyzeAccuracy.ts",
+    "discover-pdf-fields": "node --import tsx/esm scripts/discoverPdfFields.ts"
   },
   "dependencies": {
     "next": "^15.1.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

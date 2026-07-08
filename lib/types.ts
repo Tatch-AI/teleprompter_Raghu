@@ -111,6 +111,23 @@ export interface TranscriptChunk {
   text: string;
   speaker?: "agent" | "customer" | "unknown";
   createdAt: string;
+  /** Set once a rep corrects a mis-transcribed chunk — preserves what ASR actually heard. */
+  originalText?: string;
+}
+
+// A rep fixing what ASR actually heard — most commonly proper nouns (business/owner
+// names) that generic ASR mishears and no keyterm-boost list fully covers. Distinct from
+// FeedbackEvent (which corrects an extracted field's value): this corrects the transcript
+// itself, and re-triggers extraction so any fields the bad transcription broke get fixed
+// too, not just logged.
+export interface TranscriptCorrectionEvent {
+  id: string;
+  intakeId: string;
+  chunkId: string;
+  speaker?: "agent" | "customer" | "unknown";
+  originalText: string;
+  correctedText: string;
+  createdAt: string;
 }
 
 export interface RiskFlag {
