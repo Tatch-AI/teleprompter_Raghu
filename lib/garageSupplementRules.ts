@@ -13,6 +13,9 @@ export interface SupplementRuleDefinition {
    */
   validated: boolean;
   reason: string;
+  /** True when the trigger needs custom cross-field logic (see detectSuggestedSupplements),
+   * not a simple field-equals-triggerValue check. `fieldId`/`triggerValue` are unused then. */
+  crossField?: boolean;
 }
 
 // Deterministic supplement suggestions, same invariant as GARAGE_RISK_RULES:
@@ -33,6 +36,18 @@ export const GARAGE_SUPPLEMENT_RULES: SupplementRuleDefinition[] = [
     reason: "Business type is heavy vehicle sales/service, which the base GARAGE_001 application doesn't cover on its own.",
   },
   {
+    id: "heavy_vehicle_mix",
+    formId: "GARAGE_SUP_007",
+    filename: "GARAGE_SUP_007_Heavy_Vehicle_Questionnaire.pdf",
+    label: "Heavy Vehicle Questionnaire",
+    fieldId: "vehicle_mix_heavy_commercial_pct",
+    triggerValue: true,
+    crossField: true,
+    validated: false,
+    reason:
+      "A meaningful share of heavy/commercial vehicles in the sales mix can carry the same exposure as a heavy-equipment business, even when that isn't the primary business type. The exact cutoff (currently 10%) hasn't been confirmed with underwriting.",
+  },
+  {
     id: "towing_operations",
     formId: "GARAGE_SUP_018",
     filename: "GARAGE_SUP_018_Towing_Operations_Questionnaire.pdf",
@@ -51,6 +66,18 @@ export const GARAGE_SUPPLEMENT_RULES: SupplementRuleDefinition[] = [
     triggerValue: "wholesale",
     validated: true,
     reason: "Sales model is wholesale / dealer-to-dealer, which needs its own questionnaire.",
+  },
+  {
+    id: "wholesale_or_broker_pct",
+    formId: "GARAGE_SUP_022",
+    filename: "GARAGE_SUP_022_Wholesale_Dealer_Questionnaire.pdf",
+    label: "Wholesale Dealer Questionnaire",
+    fieldId: "sales_channel_wholesale_pct",
+    triggerValue: true,
+    crossField: true,
+    validated: true,
+    reason:
+      "Any wholesale or broker share of sales (even alongside a mostly-retail operation) requires the Wholesale Dealer Questionnaire per Harper's sales-only intake rules.",
   },
   {
     id: "lessors_risk",

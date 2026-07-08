@@ -4,6 +4,7 @@
 
 import {
   ConflictRecord,
+  DriverRecord,
   EvidenceSnippet,
   ExtractedFieldCandidate,
   ExtractionResult,
@@ -23,6 +24,13 @@ import { GARAGE_TALK_TRACK } from "./garageTalkTrack";
 import { GARAGE_RISK_RULES } from "./garageRiskRules";
 import { GARAGE_SUPPLEMENT_RULES } from "./garageSupplementRules";
 import { getRecommendedCoverageLines } from "./garageCoverageRules";
+import { detectValidationIssues } from "./garageValidationRules";
+import {
+  DRIVER_FIELD_BY_ID,
+  DRIVER_KNOWN_FIELD_IDS,
+  createEmptyDriver,
+  isDriverComplete,
+} from "./garageDriverFields";
 import { formatFieldValue } from "./formatters";
 
 export const AUTO_FILL_THRESHOLD = 0.8;
@@ -288,6 +296,80 @@ export function mergeExtractedFields(
   return { ...state, fields };
 }
 
+// Same merge semantics as mergeCandidate (status-from-confidence, conflict
+// detection, never-downgrade), scoped to drivers[0] instead of state.fields.
+// Minimal version: one driver only — see futurescope.md item 1 for the
+// multi-driver plan.
+export function mergeDriverCandidates(
+  state: IntakeState,
+  candidates: ExtractedFieldCandidate[],
+  chunk: TranscriptChunk,
+): IntakeState {
+  const known = candidates.filter((c) => DRIVER_KNOWN_FIELD_IDS.has(c.fieldId));
+  if (known.length === 0) return state;
+
+  const driver: DriverRecord = state.drivers[0]
+    ? { ...state.drivers[0], fields: { ...state.drivers[0].fields } }
+    : createEmptyDriver("driver-1");
+
+  for (const candidate of known) {
+    const def = DRIVER_FIELD_BY_ID[candidate.fieldId];
+    const normalized = normalizeCandidate({ type: def.type } as FieldDefinition, candidate.value, candidate.normalizedValue);
+    if (isEmptyValue(normalized)) continue;
+
+    const fs: FieldState = { ...driver.fields[candidate.fieldId] };
+    fs.evidence = [...fs.evidence];
+    const conf = clampConfidence(candidate.confidence);
+    const snippet: EvidenceSnippet = {
+      transcriptChunkId: chunk.id,
+      quote: candidate.evidenceQuote?.trim() || chunk.text,
+      speaker: chunk.speaker,
+    };
+
+    if (fs.status === "conflict" && fs.conflict && !fs.conflict.resolved) {
+      driver.fields[candidate.fieldId] = fs;
+      continue;
+    }
+
+    if (fs.everSeen && !isEmptyValue(fs.value)) {
+      if (valuesEquivalent(normalized, fs.normalizedValue, def.type)) {
+        fs.bestConfidence = Math.max(fs.bestConfidence, conf);
+        fs.confidence = conf;
+        fs.evidence = [...fs.evidence, snippet].slice(-4);
+        fs.status = fs.status === "filled" || fs.confirmed ? "filled" : statusFromConfidence(fs.bestConfidence);
+        fs.lastUpdatedAt = chunk.createdAt;
+      } else {
+        fs.conflict = {
+          id: `conflict-driver-${candidate.fieldId}-${chunk.id}`,
+          fieldId: candidate.fieldId,
+          existingValue: fs.value,
+          newValue: candidate.value,
+          existingEvidence: fs.evidence[fs.evidence.length - 1],
+          newEvidence: snippet,
+          reason: `Earlier answer was "${fs.value}", now hearing "${candidate.value}".`,
+          resolved: false,
+        };
+        fs.status = "conflict";
+        fs.lastUpdatedAt = chunk.createdAt;
+      }
+    } else {
+      fs.value = candidate.value;
+      fs.normalizedValue = normalized;
+      fs.everSeen = true;
+      fs.confirmed = false;
+      fs.bestConfidence = conf;
+      fs.confidence = conf;
+      fs.evidence = [snippet];
+      fs.status = statusFromConfidence(conf);
+      fs.lastUpdatedAt = chunk.createdAt;
+    }
+
+    driver.fields[candidate.fieldId] = fs;
+  }
+
+  return { ...state, drivers: [driver, ...state.drivers.slice(1)] };
+}
+
 function applyBusinessType(
   state: IntakeState,
   potential: GarageBusinessType | null | undefined,
@@ -401,6 +483,23 @@ export function detectRiskFlags(state: IntakeState, previous: RiskFlag[]): RiskF
         const k = state.fields["keys_handling"];
         holds = !!k && k.status === "filled" && keysLeftInVehicle(k.normalizedValue ?? k.value);
         evidence = k?.evidence[k.evidence.length - 1];
+      } else if (rule.id === "min_vehicles_sold") {
+        const v = state.fields["vehicles_sold_per_year"];
+        const n = Number(v?.normalizedValue ?? v?.value);
+        holds = v?.status === "filled" && Number.isFinite(n) && n < 15;
+        evidence = v?.evidence[v.evidence.length - 1];
+      } else if (rule.id === "min_owner_experience") {
+        const e = state.fields["owner_experience_years"];
+        const n = Number(e?.normalizedValue ?? e?.value);
+        holds = e?.status === "filled" && Number.isFinite(n) && n < 3;
+        evidence = e?.evidence[e.evidence.length - 1];
+      } else if (rule.id === "plate_to_driver_ratio") {
+        const p = state.fields["dealer_plate_count"];
+        const plates = Number(p?.normalizedValue ?? p?.value);
+        const namedDrivers = state.drivers.filter((d) => d.fields.driver_name?.status !== "missing").length;
+        holds =
+          p?.status === "filled" && Number.isFinite(plates) && namedDrivers > 0 && plates / namedDrivers > 3;
+        evidence = p?.evidence[p.evidence.length - 1];
       }
     } else {
       holds = filledEquals(fs, rule.triggerValue);
@@ -421,6 +520,23 @@ export function detectRiskFlags(state: IntakeState, previous: RiskFlag[]): RiskF
       reason: rule.reason,
     });
   }
+
+  // Per Harper University training: no complete driver record (full name,
+  // DOB, license number) is an automatic decline, not just a missing field —
+  // gated on business type so it doesn't fire before the call has even started.
+  if (state.businessType && !state.drivers.some(isDriverComplete)) {
+    flags.push({
+      id: "risk-no_complete_driver",
+      ruleId: "no_complete_driver",
+      label: "No complete driver on file",
+      severity: "knockout",
+      detected: true,
+      resolved: prevResolved["no_complete_driver"] ?? false,
+      recommendedAction: "Get at least one driver's full name, date of birth, and license number — the application cannot be submitted without it.",
+      reason: "Training material calls this the number one reason submissions get declined.",
+    });
+  }
+
   return flags;
 }
 
@@ -433,10 +549,38 @@ export function detectSuggestedSupplements(
 
   const suggestions: SuggestedSupplement[] = [];
   for (const rule of GARAGE_SUPPLEMENT_RULES) {
-    const holds =
-      rule.fieldId === "business_type"
-        ? state.businessType === rule.triggerValue
-        : filledEquals(state.fields[rule.fieldId], rule.triggerValue);
+    let holds: boolean;
+    if (rule.crossField) {
+      if (rule.id === "heavy_vehicle_mix") {
+        // Skip when the primary business-type rule already covers this form —
+        // avoids two suggestion cards for the same GARAGE_SUP_007.
+        const mixFs = state.fields["vehicle_mix_heavy_commercial_pct"];
+        const mixPct = Number(mixFs?.normalizedValue ?? mixFs?.value);
+        holds =
+          state.businessType !== "heavy" &&
+          mixFs?.status === "filled" &&
+          Number.isFinite(mixPct) &&
+          mixPct >= 10;
+      } else if (rule.id === "wholesale_or_broker_pct") {
+        // Skip when the coarse sales_model trigger already covers this form —
+        // avoids two suggestion cards for the same GARAGE_SUP_022.
+        const wholesaleFs = state.fields["sales_channel_wholesale_pct"];
+        const brokerFs = state.fields["sales_channel_broker_pct"];
+        const wholesalePct = Number(wholesaleFs?.normalizedValue ?? wholesaleFs?.value);
+        const brokerPct = Number(brokerFs?.normalizedValue ?? brokerFs?.value);
+        const wholesaleOver0 = wholesaleFs?.status === "filled" && wholesalePct > 0;
+        const brokerOver0 = brokerFs?.status === "filled" && brokerPct > 0;
+        const salesModelAlreadyWholesale = filledEquals(state.fields["sales_model"], "wholesale");
+        holds = !salesModelAlreadyWholesale && (wholesaleOver0 || brokerOver0);
+      } else {
+        holds = false;
+      }
+    } else {
+      holds =
+        rule.fieldId === "business_type"
+          ? state.businessType === rule.triggerValue
+          : filledEquals(state.fields[rule.fieldId], rule.triggerValue);
+    }
     if (!holds) continue;
 
     suggestions.push({
@@ -618,9 +762,13 @@ export function recompute(state: IntakeState): {
     recommendedCoverageLines: getRecommendedCoverageLines(state.businessType),
     updatedAt: new Date().toISOString(),
   };
+  const withValidation: IntakeState = {
+    ...withoutQuestion,
+    validationIssues: detectValidationIssues(withoutQuestion),
+  };
 
-  const { nextBestQuestion, reasons } = selectNextBestQuestion(withoutQuestion);
-  return { state: withoutQuestion, nextBestQuestion, reasons };
+  const { nextBestQuestion, reasons } = selectNextBestQuestion(withValidation);
+  return { state: withValidation, nextBestQuestion, reasons };
 }
 
 // ---------------------------------------------------------------------------
@@ -634,6 +782,7 @@ export function processExtraction(
 ): { state: IntakeState; nextBestQuestion: NextBestQuestion; reasons: string[] } {
   let next = appendTranscriptChunk(state, chunk);
   next = mergeExtractedFields(next, extraction.extractedFields, chunk);
+  next = mergeDriverCandidates(next, extraction.driverFields ?? [], chunk);
 
   // Derive business type from the explicit signal or an extracted business_type field.
   const explicitBt = extraction.extractedFields.find((c) => c.fieldId === "business_type");

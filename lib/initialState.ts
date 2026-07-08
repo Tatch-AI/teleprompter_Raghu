@@ -26,6 +26,7 @@ export function createInitialIntakeState(): IntakeState {
     businessTypeConfidence: 0,
     transcriptChunks: [],
     fields,
+    drivers: [],
     // Business-type-aware; recomputed on every chunk by the engine.
     missingRequiredFieldIds: GARAGE_FIELD_DEFINITIONS.filter((f) => f.required && f.businessTypes === "everyone").map(
       (f) => f.id,
@@ -34,6 +35,7 @@ export function createInitialIntakeState(): IntakeState {
     riskFlags: [],
     suggestedSupplements: [],
     recommendedCoverageLines: [],
+    validationIssues: [],
     completedStepIds: [],
     generation: 0,
     updatedAt: new Date().toISOString(),

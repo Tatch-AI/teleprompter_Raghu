@@ -116,6 +116,52 @@ export const GARAGE_RISK_RULES: RiskRuleDefinition[] = [
       "Steer toward a key cabinet in the office or keys taken home; keys in the vehicle is a placement problem.",
     reason: "Keys in the vehicle or a vehicle-mounted lockbox is a theft problem markets may not accept.",
   },
+  {
+    id: "titles_not_transferred_promptly",
+    label: "Titles not transferred promptly",
+    severity: "knockout",
+    fieldId: "titles_transfer_promptly",
+    triggerValue: false,
+    recommendedAction: "Confirm whether titles can transfer promptly on every sale going forward.",
+    reason: "Carriers will not write against state title-transfer non-compliance.",
+  },
+  {
+    id: "dealer_license_required",
+    label: "No dealer's license",
+    severity: "knockout",
+    fieldId: "dealer_license",
+    triggerValue: false,
+    recommendedAction:
+      "Confirm whether the license is truly absent or just pending — capture the pending stage and expected date if so.",
+    reason: "Carriers can't insure an unlicensed dealer.",
+  },
+  {
+    id: "min_vehicles_sold",
+    label: "Under 15 vehicles sold per year",
+    severity: "knockout",
+    fieldId: "vehicles_sold_per_year",
+    crossField: true,
+    recommendedAction: "Confirm the annual volume — under 15/year is treated as hobbyist exposure by most markets.",
+    reason: "Carriers treat under-15-per-year sellers as hobbyists and typically won't write them.",
+  },
+  {
+    id: "min_owner_experience",
+    label: "Under 3 years of owner experience",
+    severity: "knockout",
+    fieldId: "owner_experience_years",
+    crossField: true,
+    recommendedAction: "Confirm the owner's actual industry experience — most carriers won't write under 3 years.",
+    reason: "Most carriers will not write inexperienced operators.",
+  },
+  {
+    id: "plate_to_driver_ratio",
+    label: "Too many dealer plates per named driver",
+    severity: "knockout",
+    fieldId: "dealer_plate_count",
+    crossField: true,
+    recommendedAction: "Verify the plate count, or add the additional named drivers/owners who use them.",
+    reason: "More than 3 dealer plates per named driver/owner typically blocks placement.",
+  },
 ];
 
 export const RISK_RULE_BY_ID: Record<string, RiskRuleDefinition> = Object.fromEntries(

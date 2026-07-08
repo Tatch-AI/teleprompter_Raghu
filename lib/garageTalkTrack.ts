@@ -96,6 +96,28 @@ export const GARAGE_TALK_TRACK: TalkTrackStep[] = [
     mapsToFields: ["vehicles_sold_per_year", "sales_revenue", "service_repair_revenue"],
   },
   {
+    id: "vehicle_mix",
+    section: "Dealer operations",
+    businessTypes: ["dealer"],
+    question:
+      "Of what you sell, roughly what percent is private passenger vehicles, what percent is heavy or commercial, and what percent is motorcycles or other?",
+    whyWeAsk: "Vehicle-type mix drives rating and must total 100% or the application gets kicked back by underwriting.",
+    mapsToFields: [
+      "vehicle_mix_private_passenger_pct",
+      "vehicle_mix_heavy_commercial_pct",
+      "vehicle_mix_motorcycle_other_pct",
+    ],
+  },
+  {
+    id: "sales_channel_mix",
+    section: "Dealer operations",
+    businessTypes: ["dealer"],
+    question:
+      "Of your sales, roughly what percent is retail to the public, what percent is broker, and what percent is wholesale?",
+    whyWeAsk: "Any wholesale or broker share needs its own questionnaire alongside this application, and the split has to total 100%.",
+    mapsToFields: ["sales_channel_retail_pct", "sales_channel_broker_pct", "sales_channel_wholesale_pct"],
+  },
+  {
     id: "dealer_plate_count",
     section: "Dealer operations",
     businessTypes: ["dealer", "dealer_plus_repair"],
@@ -143,6 +165,16 @@ export const GARAGE_TALK_TRACK: TalkTrackStep[] = [
       "Self-repossession with no buy-here-pay-here is inconsistent — if they don't carry the paper, why would they repossess?",
     mapsToFields: ["self_repossession"],
     riskRuleIds: ["self_repossession", "self_repo_without_bhph"],
+  },
+  {
+    id: "dealer_license",
+    section: "Dealer operations",
+    businessTypes: ["dealer", "dealer_plus_repair"],
+    question: "Do you have your dealer's license?",
+    whyWeAsk: "Carriers can't insure an unlicensed dealer.",
+    knockout: "No dealer's license is a hard stop — if it's pending, capture the pending status and expected date instead of a flat no.",
+    mapsToFields: ["dealer_license"],
+    riskRuleIds: ["dealer_license_required"],
   },
   {
     id: "test_drive_controls",

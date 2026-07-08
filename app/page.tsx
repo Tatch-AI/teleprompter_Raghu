@@ -6,6 +6,8 @@ import TranscriptPanel from "@/components/TranscriptPanel";
 import CallGuidePanel from "@/components/CallGuidePanel";
 import ConflictBanner from "@/components/ConflictBanner";
 import RiskFlagsPanel from "@/components/RiskFlagsPanel";
+import ValidationPanel from "@/components/ValidationPanel";
+import DriversPanel from "@/components/DriversPanel";
 import SupplementsPanel from "@/components/SupplementsPanel";
 import DebugJsonPanel from "@/components/DebugJsonPanel";
 import FeedbackPanel from "@/components/FeedbackPanel";
@@ -473,6 +475,8 @@ export default function HomePage() {
           />
         </div>
         <RiskFlagsPanel flags={intakeState.riskFlags} onAcknowledge={handleAcknowledgeRisk} />
+        <ValidationPanel issues={intakeState.validationIssues} />
+        <DriversPanel drivers={intakeState.drivers} />
         <SupplementsPanel
           supplements={intakeState.suggestedSupplements}
           onAcknowledge={handleAcknowledgeSupplement}

@@ -27,6 +27,10 @@ export const VALLEY_AUTO_CHUNKS: MockTranscriptChunk[] = [
   },
   {
     speaker: "customer",
+    text: "Of what we sell, it's about 90% private passenger vehicles, 8% heavy trucks or commercial, and the other 2% is motorcycles or other.",
+  },
+  {
+    speaker: "customer",
     text: "We have three dealer plates, and no, we never rent or loan them out.",
   },
   {
@@ -40,6 +44,10 @@ export const VALLEY_AUTO_CHUNKS: MockTranscriptChunk[] = [
   {
     speaker: "customer",
     text: "We keep keys in a locked cabinet in the office after hours. The lot is fenced and has cameras.",
+  },
+  {
+    speaker: "customer",
+    text: "The only driver is Maria Lopez, born March 4, 1985. Her license number is D1234567 from California.",
   },
   {
     speaker: "customer",

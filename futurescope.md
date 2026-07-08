@@ -27,6 +27,21 @@ of this. Ordered roughly by how much it would hurt in production.
   hand. Runs client-side, leaves the form editable, and raises real
   conflicts instead of silently overwriting. Verified end to end on a live
   call.
+- **Six rules from a real Harper sales-only intake document** (Colony Garage
+  Application, GAR-APP121-0525): minimum 15 vehicles/year, minimum 3 years
+  owner experience, titles not transferred promptly, dealer's license
+  required (a pending license counts as yes, not a decline), plate-to-driver
+  ratio (max 3 plates per named driver), and a retail/broker/wholesale sales
+  mix using the same percent-group mechanism as vehicle mix. Also added a
+  second trigger for the Wholesale Dealer Questionnaire based on the
+  wholesale/broker percentage directly, not just the existing `sales_model`
+  field. Checking each rule against the actual PDF text (not just my own
+  summary of it) caught two real bugs: a pending dealer's license was being
+  read as a decline instead of a yes, and `titles_transfer_promptly`
+  extraction failed on any phrasing where "titles" and "transfer" weren't
+  immediately next to each other (e.g. "titles don't transfer promptly").
+  Both fixed, both covered by tests. 20 new checks in
+  `scripts/tests/harperRules.test.ts`.
 
 ## The PDF export has no eval
 
@@ -87,6 +102,10 @@ All from the training material:
 - Optional coverages: wind/hail/flood, theft and vandalism, false pretense
 - Vehicle-mix cross-check against the repair revenue split, blocked on
   `dealer_plus_repair` support
+- Driver license state must match the dealer's licensed state(s) — needs a
+  new "states licensed in" field plus a per-driver cross-check
+- Liability limit must be at least the largest Dealers Physical Damage lot
+  limit — needs a lot-limit field we don't have
 
 ## Chunking and interruptions haven't been stress-tested
 

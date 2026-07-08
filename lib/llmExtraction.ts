@@ -140,26 +140,138 @@ async function callOpenAIOnce(
 
 export type ExtractorMode = "llm" | "mock";
 
-// Runs the real LLM when a key is present (one silent retry on failure),
-// otherwise the deterministic mock. Throws only when the LLM is configured
-// but both attempts fail — the API route turns that into a safe no-op.
+// Live/mic chunks are naturally short (Deepgram flushes on utterance-end or a speaker
+// change), so these thresholds essentially never fire in normal call flow — they exist
+// for the input that has no natural length bound: a rep pasting a large block of text
+// (and, in the future, uploaded documents). A single very long extraction call degrades
+// quality (evidence-quote matching gets less reliable, facts are easier to miss) well
+// before it would hit an actual token-limit error, so this splits proactively rather
+// than waiting to hit a hard API failure.
+const MAX_CHUNK_CHARS = 2000;
+// Wide enough that a single sentence essentially never gets split across a window
+// boundary — losing the connection between e.g. a number and the noun it modifies would
+// silently drop or corrupt a fact instead of just costing an extra API call.
+const CHUNK_OVERLAP_CHARS = 300;
+
+export function splitWithOverlap(
+  text: string,
+  maxChars: number = MAX_CHUNK_CHARS,
+  overlapChars: number = CHUNK_OVERLAP_CHARS,
+): string[] {
+  if (text.length <= maxChars) return [text];
+  const windows: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + maxChars, text.length);
+    windows.push(text.slice(start, end));
+    if (end === text.length) break;
+    start = end - overlapChars;
+  }
+  return windows;
+}
+
+function dedupeKey(id: string, quote: string): string {
+  return `${id}::${quote.trim().toLowerCase()}`;
+}
+
+// Overlapping windows mean the same real-world fact can come back twice (once from each
+// window that spans it) — dedupe by (id, evidence quote) and keep the higher-confidence
+// copy. Candidates for the same fieldId with genuinely *different* evidence are kept as
+// separate entries rather than collapsed, so the existing conflict-detection pipeline in
+// rules.ts still gets a chance to catch a real contradiction instead of this silently
+// picking one.
+function mergeExtractionResults(results: ExtractionResult[]): ExtractionResult {
+  if (results.length === 1) return results[0];
+
+  const fields = new Map<string, ExtractedFieldCandidate>();
+  for (const r of results) {
+    for (const f of r.extractedFields) {
+      const key = dedupeKey(f.fieldId, f.evidenceQuote);
+      const existing = fields.get(key);
+      if (!existing || f.confidence > existing.confidence) fields.set(key, f);
+    }
+  }
+
+  const driverFields = new Map<string, ExtractedFieldCandidate>();
+  for (const r of results) {
+    for (const f of r.driverFields ?? []) {
+      const key = dedupeKey(f.fieldId, f.evidenceQuote);
+      const existing = driverFields.get(key);
+      if (!existing || f.confidence > existing.confidence) driverFields.set(key, f);
+    }
+  }
+
+  const conflicts = new Map<string, ExtractionResult["potentialConflicts"][number]>();
+  for (const r of results) {
+    for (const c of r.potentialConflicts) conflicts.set(dedupeKey(c.fieldId, c.evidenceQuote), c);
+  }
+
+  const risks = new Map<string, ExtractionResult["riskSignals"][number]>();
+  for (const r of results) {
+    for (const s of r.riskSignals) {
+      const key = dedupeKey(s.riskRuleId, s.evidenceQuote);
+      const existing = risks.get(key);
+      if (!existing || s.confidence > existing.confidence) risks.set(key, s);
+    }
+  }
+
+  let potentialBusinessType: GarageBusinessType | null = null;
+  let businessTypeConfidence: number | undefined;
+  for (const r of results) {
+    const conf = r.businessTypeConfidence ?? 0;
+    if (r.potentialBusinessType && (businessTypeConfidence === undefined || conf > businessTypeConfidence)) {
+      potentialBusinessType = r.potentialBusinessType;
+      businessTypeConfidence = r.businessTypeConfidence;
+    }
+  }
+
+  return {
+    extractedFields: Array.from(fields.values()),
+    driverFields: Array.from(driverFields.values()),
+    potentialBusinessType,
+    businessTypeConfidence,
+    potentialConflicts: Array.from(conflicts.values()),
+    riskSignals: Array.from(risks.values()),
+    unprocessedNotes: Array.from(new Set(results.flatMap((r) => r.unprocessedNotes))),
+  };
+}
+
+async function extractWindowFromOpenAI(
+  apiKey: string,
+  model: string,
+  state: IntakeState,
+  window: string,
+): Promise<ExtractionResult> {
+  try {
+    return await callOpenAIOnce(apiKey, model, state, window);
+  } catch {
+    // Silent one-shot retry, same as the pre-windowing behavior.
+    return await callOpenAIOnce(apiKey, model, state, window);
+  }
+}
+
+// Runs the real LLM when a key is present (one silent retry on failure per window),
+// otherwise the deterministic mock. Throws only when the LLM is configured but both
+// attempts on a window fail — the API route turns that into a safe no-op. Splits input
+// over MAX_CHUNK_CHARS into overlapping windows first; for the overwhelming majority of
+// chunks (any real spoken utterance) this is a single window and behaves exactly as
+// before — one call, no merge overhead.
 export async function runExtraction(
   state: IntakeState,
   transcriptChunk: string,
 ): Promise<{ result: ExtractionResult; mode: ExtractorMode }> {
+  const windows = splitWithOverlap(transcriptChunk);
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
   if (apiKey) {
-    try {
-      return { result: await callOpenAIOnce(apiKey, model, state, transcriptChunk), mode: "llm" };
-    } catch {
-      // Silent one-shot retry.
-      return { result: await callOpenAIOnce(apiKey, model, state, transcriptChunk), mode: "llm" };
-    }
+    const results = await Promise.all(
+      windows.map((w) => extractWindowFromOpenAI(apiKey, model, state, w)),
+    );
+    return { result: mergeExtractionResults(results), mode: "llm" };
   }
 
-  return { result: mockExtract(state, transcriptChunk), mode: "mock" };
+  return { result: mergeExtractionResults(windows.map((w) => mockExtract(state, w))), mode: "mock" };
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +389,56 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
     fields.push(candidate("sales_revenue", `${rev[1]}${unit}`, 0.85, rev[0]));
   }
 
+  // Vehicle-type sales mix (percentages) — number-then-keyword or keyword-then-number,
+  // with generous filler tolerance since real speech rarely puts them adjacent
+  // ("90% is private passenger and then 10% of the time I'm selling heavy trucks").
+  function pctNear(keywordAlternation: string): number | null {
+    // [^.%] (not just [^.]) so the gap can't skip over another number's "%"
+    // sign to reach a keyword that actually belongs to a different figure.
+    const forward = new RegExp(`(\\d{1,3}(?:\\.\\d+)?)\\s*(?:%|percent)[^.%]{0,40}?(?:${keywordAlternation})`, "i");
+    const backward = new RegExp(`(?:${keywordAlternation})[^.%]{0,40}?(\\d{1,3}(?:\\.\\d+)?)\\s*(?:%|percent)`, "i");
+    const m = text.match(forward) ?? text.match(backward);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+  const passengerPct = pctNear("private passenger|passenger vehicles?|regular (?:cars|vehicles)");
+  const heavyPct = pctNear("heavy (?:trucks?|commercial|vehicles?|duty)|commercial vehicles?");
+  const motoOtherPct = pctNear("motorcycles?|other vehicle types?|other types?");
+  if (passengerPct !== null) {
+    fields.push(candidate("vehicle_mix_private_passenger_pct", passengerPct, 0.85, "vehicle mix — private passenger"));
+  }
+  if (heavyPct !== null) {
+    fields.push(candidate("vehicle_mix_heavy_commercial_pct", heavyPct, 0.85, "vehicle mix — heavy/commercial"));
+  }
+  if (motoOtherPct !== null) {
+    fields.push(candidate("vehicle_mix_motorcycle_other_pct", motoOtherPct, 0.8, "vehicle mix — motorcycle/other"));
+  }
+
+  // Sales channel mix (retail/broker/wholesale) — same pctNear helper as vehicle mix.
+  const retailPct = pctNear("retail(?:\\s+sales|\\s+to\\s+the\\s+public)?");
+  const brokerPct = pctNear("broker(?:age)?");
+  const wholesalePct = pctNear("wholesale");
+  if (retailPct !== null) {
+    fields.push(candidate("sales_channel_retail_pct", retailPct, 0.85, "sales channel — retail"));
+  }
+  if (brokerPct !== null) {
+    fields.push(candidate("sales_channel_broker_pct", brokerPct, 0.85, "sales channel — broker"));
+  }
+  if (wholesalePct !== null) {
+    fields.push(candidate("sales_channel_wholesale_pct", wholesalePct, 0.85, "sales channel — wholesale"));
+  }
+
+  // Dealer's license. Per the real Harper rules doc: a *pending* license still
+  // counts as Yes ("carriers will quote pending applicants when the status is
+  // clearly stated") — only an outright absent license is a No.
+  if (/dealer'?s?\s+licen[sc]e/.test(text)) {
+    const hasLicense = /pending/.test(text)
+      ? true
+      : !/(don'?t have|do not have|no dealer'?s?\s+licen[sc]e|not licensed)/.test(text);
+    fields.push(candidate("dealer_license", hasLicense, 0.85, "dealer's license"));
+  }
+
   // Dealer plate count
   const plates = text.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+dealer\s+plates?/);
   if (plates) fields.push(candidate("dealer_plate_count", plates[1], 0.9, plates[0]));
@@ -305,9 +467,10 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
     fields.push(candidate("self_repossession", repos, 0.85, "repossess vehicles I sell myself"));
   }
 
-  // Titles transfer promptly
-  if (/titles?\s+transfer|transfer\s+(the\s+)?titles?/.test(text)) {
-    const promptly = !/(don't transfer|do not transfer|late|delay(ed)?|not promptly)/.test(text);
+  // Titles transfer promptly. [^.]{0,20}? bridges natural phrasing like
+  // "titles don't transfer promptly" — the old exact-adjacency check missed this.
+  if (/titles?[^.]{0,20}?transfer|transfer\s+(the\s+)?titles?/.test(text)) {
+    const promptly = !/(don'?t|do not|doesn'?t|does not)[^.]{0,15}?transfer|late|delay(ed)?|not promptly/.test(text);
     fields.push(candidate("titles_transfer_promptly", promptly, 0.85, "titles transfer promptly"));
   }
 
@@ -399,8 +562,26 @@ export function mockExtract(_state: IntakeState, chunkText: string): ExtractionR
   const site = chunkText.match(/((https?:\/\/)?[a-z0-9.-]+\.(com|net|org|biz)[^\s]*|facebook\.com\/[^\s]+)/i);
   if (site) fields.push(candidate("website_or_facebook", site[0], 0.85, site[0]));
 
+  // Driver schedule (minimal: one driver) — full name, DOB, license number/state.
+  // Matched on the original-case chunk text so the name/license keep their casing.
+  const driverFields: ExtractedFieldCandidate[] = [];
+  const driverName = chunkText.match(/driver is\s+([A-Z][a-zA-Z.'-]+(?:\s[A-Z][a-zA-Z.'-]+){0,2})/);
+  if (driverName) driverFields.push(candidate("driver_name", driverName[1].trim(), 0.85, driverName[0]));
+
+  const driverDob = chunkText.match(/born\s+([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i);
+  if (driverDob) driverFields.push(candidate("driver_dob", driverDob[1], 0.85, driverDob[0]));
+
+  const driverLicense = chunkText.match(/license number is\s+([A-Za-z0-9-]+)(\s+from\s+([A-Z][a-z]+))?/i);
+  if (driverLicense) {
+    driverFields.push(candidate("driver_license_number", driverLicense[1], 0.85, driverLicense[0]));
+    if (driverLicense[3]) {
+      driverFields.push(candidate("driver_license_state", driverLicense[3], 0.8, driverLicense[0]));
+    }
+  }
+
   return {
     extractedFields: fields,
+    driverFields,
     potentialBusinessType,
     businessTypeConfidence,
     potentialConflicts: [],

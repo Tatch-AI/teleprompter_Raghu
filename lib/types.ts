@@ -146,6 +146,29 @@ export interface CoverageLineRecommendation {
   reason: string;
 }
 
+export type ValidationSeverity = "error" | "warning";
+
+// Cross-field checks — distinct from a single field's status. A field can be
+// individually `filled` and still participate in a validation error (e.g. a
+// vehicle-mix percentage that's filled but the group doesn't sum to 100).
+export interface ValidationIssue {
+  id: string;
+  ruleId: string;
+  severity: ValidationSeverity;
+  label: string;
+  message: string;
+  fieldIds: string[];
+}
+
+// One driver on the schedule. Reuses FieldState per sub-field (not a raw JSON
+// blob) so a driver's name/DOB/license get the same status/confidence/
+// evidence/conflict tracking as every other field in the application —
+// see futurescope.md item 1 for why a flat object would be a regression.
+export interface DriverRecord {
+  id: string;
+  fields: Record<string, FieldState>;
+}
+
 export interface IntakeState {
   intakeId: string;
   vertical: "garage";
@@ -155,11 +178,14 @@ export interface IntakeState {
   businessTypeConfidence: number;
   transcriptChunks: TranscriptChunk[];
   fields: Record<string, FieldState>;
+  /** Driver schedule. Minimal version: supports one driver (drivers[0]). */
+  drivers: DriverRecord[];
   missingRequiredFieldIds: string[];
   conflicts: ConflictRecord[];
   riskFlags: RiskFlag[];
   suggestedSupplements: SuggestedSupplement[];
   recommendedCoverageLines: CoverageLineRecommendation[];
+  validationIssues: ValidationIssue[];
   completedStepIds: string[];
   /** Monotonic counter; stale responses are dropped by the client. */
   generation: number;
@@ -188,6 +214,8 @@ export interface ExtractedFieldCandidate {
 
 export interface ExtractionResult {
   extractedFields: ExtractedFieldCandidate[];
+  /** Driver-schedule candidates — merged into drivers[0], not state.fields. */
+  driverFields?: ExtractedFieldCandidate[];
   potentialBusinessType?: GarageBusinessType | null;
   businessTypeConfidence?: number;
   potentialConflicts: {
