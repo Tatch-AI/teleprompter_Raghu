@@ -38,6 +38,7 @@ next-env.d.ts
 
 # personal working notes, not for the team
 /BACKEND_NOTES.md
+/CHEATSHEET.md
 
 # Claude Code agent worktree metadata
 /.claude/worktrees/

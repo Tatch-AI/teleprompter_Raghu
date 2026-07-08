@@ -9,6 +9,17 @@ The transcript is just the input. The actual product is a deterministic rules
 engine sitting behind it — the LLM's role is a single inference pass per
 chunk, returning candidate facts with evidence. It performs no decisioning.
 
+## Screenshots
+
+Landing state, no call in progress yet:
+
+![Landing state](./docs/screenshots/01-landing.png)
+
+Mid-call: a plate-count conflict waiting to be resolved, a driver record
+filled in from the transcript, and the application filling itself out live:
+
+![Mid-call state](./docs/screenshots/02-after-script.png)
+
 ## How a call moves through it
 
 ```
@@ -100,16 +111,6 @@ interface, not a structural change to the extraction or rules pipeline.
 (Confirm / Edit / conflict resolution) and every raw extraction candidate is
 persisted to an append-only log specifically to support future recalibration
 against outcome data.
-
-## Worth knowing before you trust it
-
-- Speaker labels (agent vs. customer) are best-effort. Diarization just
-  clusters distinct voices in one audio stream; it has no idea who's who.
-  Extraction doesn't care which label is attached, but the "who said it"
-  quote shown to the rep can be wrong.
-- `filled` never downgrades, conflicts always go to the rep instead of being
-  auto-resolved, and business type is sticky once set. Full list of these in
-  `AGENTS.md`.
 
 ## Running it
 
