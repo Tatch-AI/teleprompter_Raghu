@@ -1,0 +1,27 @@
+{
+  "call": "dexters_auto",
+  "description": "Dexter's Auto — condensed real Harper intake call",
+  "notes": "sales_revenue and dealer_plate_count are intentionally excluded: this real call has genuine mid-call corrections ($35->$35,000, two->three plates) that the engine correctly raises as unresolved conflicts rather than auto-picking a value, so there is no single 'right' extracted value until a rep resolves it. See scripts/tests/engine.test.ts for the conflict-resolution assertions.",
+  "fields": {
+    "business_type": "dealer",
+    "legal_name": "Dexter's Auto LLC",
+    "entity_type": "LLC",
+    "years_in_business": 8,
+    "sales_model": "retail",
+    "vehicles_sold_per_year": 10,
+    "vehicle_mix_private_passenger_pct": 100,
+    "buy_here_pay_here": false,
+    "titles_transfer_promptly": true,
+    "self_repossession": true,
+    "test_drives_allowed": true,
+    "test_drive_license_check": true,
+    "test_drive_ride_along": true,
+    "overnight_test_drives": false,
+    "rideshare_use_owned_autos": false,
+    "plates_loaned_or_rented": false,
+    "lot_security": "open lot",
+    "keys_handling": "lockbox",
+    "desired_liability_limits": "75,000",
+    "why_shopping": "shopping"
+  }
+}

@@ -10,6 +10,7 @@
     "test": "node --import tsx/esm scripts/tests/engine.test.ts && node --import tsx/esm scripts/tests/coverageLines.test.ts && node --import tsx/esm scripts/tests/validation.test.ts && node --import tsx/esm scripts/tests/drivers.test.ts && node --import tsx/esm scripts/tests/harperRules.test.ts",
     "synthesize-demo-audio": "node --import tsx/esm scripts/synthesizeDemoCalls.ts",
     "analyze-accuracy": "node --import tsx/esm scripts/analyzeAccuracy.ts",
+    "eval-accuracy": "node --import tsx/esm scripts/evalAccuracy.ts",
     "discover-pdf-fields": "node --import tsx/esm scripts/discoverPdfFields.ts"
   },
   "dependencies": {

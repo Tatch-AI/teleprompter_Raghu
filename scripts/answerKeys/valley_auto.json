@@ -1,0 +1,27 @@
+{
+  "call": "valley_auto",
+  "description": "Valley Auto Sales — clean used-car dealer demo call",
+  "notes": "dealer_plate_count is intentionally excluded: the script has a deliberate three->four plate correction that the engine correctly raises as an unresolved conflict rather than auto-picking one value, so there is no single 'right' extracted value until a rep resolves it.",
+  "fields": {
+    "business_type": "dealer",
+    "legal_name": "Valley Auto Sales LLC",
+    "entity_type": "LLC",
+    "years_in_business": 3,
+    "owner_experience_years": 12,
+    "sales_model": "retail",
+    "vehicles_sold_per_year": 180,
+    "sales_revenue": 2400000,
+    "vehicle_mix_private_passenger_pct": 90,
+    "vehicle_mix_heavy_commercial_pct": 8,
+    "vehicle_mix_motorcycle_other_pct": 2,
+    "plates_loaned_or_rented": false,
+    "test_drives_allowed": true,
+    "test_drive_license_check": true,
+    "test_drive_ride_along": false,
+    "lot_security": "fenced",
+    "keys_handling": "locked cabinet",
+    "current_insurance": true,
+    "current_carrier": "Progressive",
+    "prior_losses": false
+  }
+}
