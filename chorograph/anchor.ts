@@ -28,3 +28,8 @@
  * intake calls.
  * @external Deepgram in:Intake
  */
+
+/**
+ * Agent infrastructure: atlas suite, hermes, forge, memory tooling.
+ * @domain AgentsPlatform
+ */

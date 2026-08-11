@@ -89,14 +89,14 @@
  * mic and file-replay modes. lib/deepgramSource.ts.
  * @fn deepgram-live-source of:teleprompter-raghu
  * @calls Deepgram wss://api.deepgram.com/v1/listen live transcription with diarization
- * @calls GET /api/deepgram-token mint browser-safe ephemeral credential
+ * @calls teleprompter-raghu.get-api-deepgram-token mint browser-safe ephemeral credential
  */
 
 /**
  * Client-side fill of the real GARAGE_001 PDF from accumulated field state via pdf-lib.
  * lib/exportPdf.ts → fillRealApplicationPdf.
  * @fn fill-real-application-pdf of:teleprompter-raghu
- * @calls GET /api/export-pdf fetch source AcroForm bytes from garage_auto/forms/
+ * @calls teleprompter-raghu.get-api-export-pdf fetch source AcroForm bytes from garage_auto/forms/
  */
 
 /**
