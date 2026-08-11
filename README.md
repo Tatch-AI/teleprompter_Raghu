@@ -5,6 +5,14 @@ intake call. While the customer's talking, it fills out the application,
 catches problems, and tells the agent what to ask next before they'd have to
 think of it themselves.
 
+## Estate documentation
+
+Deep business context and technical architecture for the Harper platform rewrite:
+
+- [docs/BUSINESS_CONTEXT.md](./docs/BUSINESS_CONTEXT.md) — funnel stage, domain concepts, operational status
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — routes, data, flows, config
+- Architecture map: `npx chorograph render . --no-open` (annotations in `chorograph/`)
+
 The transcript is just the input. The actual product is a deterministic rules
 engine sitting behind it — the LLM's role is a single inference pass per
 chunk, returning candidate facts with evidence. It performs no decisioning.
