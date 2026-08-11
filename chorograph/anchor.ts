@@ -20,7 +20,7 @@
 
 /**
  * Structured field extraction from live call transcript chunks via OpenAI Chat Completions.
- * @external OpenAI in:Intake
+ * @external OpenAI in:AgentsPlatform
  */
 
 /**
